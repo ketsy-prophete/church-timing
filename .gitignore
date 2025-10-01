@@ -1,0 +1,6 @@
+﻿ChurchTiming.Api/bin/
+ChurchTiming.Api/obj/
+producer-ui/node_modules/
+producer-ui/dist/
+producer-ui/.angular/
+.env

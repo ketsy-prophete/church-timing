@@ -1,0 +1,16 @@
+import { Pipe, PipeTransform } from '@angular/core';
+
+@Pipe({ name: 'signedmmss', standalone: true })
+export class SignedTimePipe implements PipeTransform {
+  // plusForZero=false → 00:00; set true to force +00:00
+  transform(sec?: number | null, plusForZero = false): string {
+    if (sec == null) return '—';
+    const n = Math.floor(sec);
+    const sign = n < 0 ? '-' : (n > 0 || plusForZero) ? '+' : '';
+    const a = Math.abs(n);
+    const m = Math.floor(a / 60).toString().padStart(2, '0');
+    const s = (a % 60).toString().padStart(2, '0');
+    return `${sign}${m}:${s}`;
+  }
+}
+
