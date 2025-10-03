@@ -65,7 +65,7 @@ type StateDto = BaseStateDto & {
         </small>
       </ng-container>
 
-      <ng-template #notStarted><b>Master Timer Pending Start</b></ng-template>
+      <ng-template #notStarted><b style="color:#3BB143"> Master Timer Pending...</b></ng-template>
     </div>
     
 
@@ -107,52 +107,50 @@ type StateDto = BaseStateDto & {
 
   <!-- LINE 1: Spanish ETA form + Current ETA (blue) -->
   <div>
-    <label>Spanish ETA (mm:ss):
-      <input #eta size="5" placeholder="mm:ss"
-             (keyup.enter)="setSpanishEtaFromText(eta.value)">
+    <label>Time Left:
+      <input #eta
+            size="5"
+            placeholder="mm:ss"
+            pattern="^\d{1,3}:[0-5]\d$"
+            title="Enter minutes and seconds like 1:30"
+            (keyup.enter)="setSpanishEtaFromText(eta.value)">
     </label>
+
     <button type="button"
             style="margin-left:12px;"
             (click)="setSpanishEtaFromText(eta.value)"
-            [disabled]="!state?.masterStartAtUtc">
-      Set ETA
-    </button>
-    <button type="button"
-            style="margin-left:12px;"
-            (click)="setSpanishEtaPlus(30)"
-            [disabled]="!state?.masterStartAtUtc">
-      +30s
-    </button>
-    <button type="button"
-            style="margin-left:12px;"
-            (click)="setSpanishEtaPlus(60)"
-            [disabled]="!state?.masterStartAtUtc">
-      +60s
+            [disabled]="!state?.masterStartAtUtc || !mmssValid(eta.value)">
+      Send ETA
     </button>
 
-    <!-- Current ETA (blue), spaced after +60s -->
     <span style="margin-left:12px; opacity:.95;">
-      <span style="color:#1e40af; font-weight:700; font-size:13px">Current Eta: </span>
-      <ng-container *ngIf="$any(state?.spanish)?.sermonEndEtaSec as etaSec; else noneEta">
-        <span style="color:#1e40af; font-weight:700; font-size:13px">{{ etaSec | mmss }}</span>
+      <span style="color:#1e40af; font-weight:700; font-size:13px">Current Time Left: </span>
+      <ng-container *ngIf="currentSpanishRemainingSec() as rem; else noneEta">
+        <span style="color:#1e40af; font-weight:700; font-size:13px">{{ rem | mmss }}</span>
       </ng-container>
       <ng-template #noneEta>—</ng-template>
     </span>
+
   </div>
 
+  
+  <!-- LINE 3: Sermon Ended At (single spacing) -->
+  
+  <div style="margin-top:40px;">
+  <p style="margin:8px 0 0 0;">
+    <b>Sermon Ended At:</b>
+    {{ state?.spanish?.sermonEndedAtSec | mmss }}
+  </p>
+  </div>
+  
   <!-- LINE 2: Sermon End button (double spacing below the form) -->
-  <div style="margin-top:16px;">
+  <div style="margin-top:5px;">
     <button (click)="sermonEnd()"
             [disabled]="sermonEndClicked || (state?.spanish?.sermonEndedAtSec ?? 0) > 0">
       Sermon End
     </button>
   </div>
 
-  <!-- LINE 3: Sermon Ended At (single spacing) -->
-  <p style="margin:8px 0 0 0;">
-    <b>Sermon Ended At:</b>
-    {{ state?.spanish?.sermonEndedAtSec | mmss }}
-  </p>
 
 </div>
      
@@ -174,19 +172,21 @@ export class SpanishViewComponent implements OnInit {
   private prevCompletedIds = new Set<string>();
   lastCompletedId: string | null = null;
 
-  // seconds since master start (rounded)
-  private nowSinceMasterSec(): number | null {
-    if (!this.state?.masterStartAtUtc) return null;
-    const ms = this.hub.serverNowMs() - Date.parse(this.state.masterStartAtUtc);
-    return Math.max(0, Math.floor(ms / 1000));
+
+
+  // parse strictly "mm:ss" (00–59 seconds); returns null if invalid
+  private parseMmSs(txt: string): number | null {
+    const m = /^(\d{1,3}):([0-5]\d)$/.exec(txt.trim());
+    if (!m) return null;
+    return Number(m[1]) * 60 + Number(m[2]);
   }
 
-  // parse "mm:ss" into seconds; returns null if invalid
-  private parseMmSs(txt: string): number | null {
-    const m = txt.trim().match(/^(\d{1,2}):([0-5]\d)$/);
-    if (!m) return null;
-    return (+m[1]) * 60 + (+m[2]);
+  // Add this inside the class (anywhere with your other helpers)
+  mmssValid(v: string): boolean {
+    return /^\d{1,3}:[0-5]\d$/.test((v ?? '').trim());
   }
+
+
 
 
 
@@ -243,6 +243,32 @@ export class SpanishViewComponent implements OnInit {
     )
   );
 
+
+  async setSpanishEtaFromText(txt: string) {
+    const remaining = this.parseMmSs(txt);
+    if (remaining == null) {
+      console.warn('[ETA] Invalid mm:ss:', txt);
+      return;
+    }
+
+    const now = this.masterElapsedSec();
+    if (now == null) {
+      console.warn('[ETA] Master not started; cannot set absolute ETA.');
+      return;
+    }
+
+    await this.setSpanishEtaAbs(now + remaining);
+  }
+
+  private masterElapsedSec(): number | null {
+    const start = this.state?.masterStartAtUtc;
+    if (!start) return null;
+    const ms = this.hub.serverNowMs() - Date.parse(start);
+    return Math.max(0, Math.floor(ms / 1000));
+  }
+
+
+
   async setSpanishEtaAbs(sec: number) {
     if (sec == null || !isFinite(sec)) return;
     const eta = Math.max(0, Math.floor(sec));
@@ -254,23 +280,6 @@ export class SpanishViewComponent implements OnInit {
     }
   }
 
-  async setSpanishEtaPlus(offsetSec: number) {
-    const now = this.nowSinceMasterSec();
-    if (now == null) {
-      console.warn('[ETA] Plus clicked before master start');
-      return;
-    }
-    await this.setSpanishEtaAbs(now + offsetSec);
-  }
-
-  async setSpanishEtaFromText(txt: string) {
-    const sec = this.parseMmSs(txt);
-    if (sec == null) {
-      console.warn('[ETA] Invalid mm:ss:', txt);
-      return;
-    }
-    await this.setSpanishEtaAbs(sec);
-  }
 
 
 
@@ -321,6 +330,15 @@ export class SpanishViewComponent implements OnInit {
   }
 
 
+  currentSpanishRemainingSec(): number | null {
+    const ended = this.state?.spanish?.sermonEndedAtSec;
+    if (ended != null && ended > 0) return 0;                  // ← freeze at 0 after final
+    const etaAbs = this.state?.spanish?.sermonEndEtaSec;
+    const start = this.state?.masterStartAtUtc;
+    if (etaAbs == null || !start) return null;
+    const now = Math.max(0, Math.floor((this.hub.serverNowMs() - Date.parse(start)) / 1000));
+    return Math.max(0, etaAbs - now);
+  }
 
 
 }

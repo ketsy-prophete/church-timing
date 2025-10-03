@@ -42,6 +42,13 @@ type StateDto = BaseStateDto & {
     /* Delta hint: earlier=green, later=red */
     .toast.delta-early{border-left-color:#16a34a}
     .toast.delta-late{border-left-color:#dc2626}
+    /* Make header stop exactly above the table's right edge (i.e., above "Ended") */
+    .segments-wrap { display: inline-block; }                  /* width collapses to table width */
+    .segments-wrap table { width: auto; }                      /* ensure table doesn't stretch to 100% */
+    .segments-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 16px 0 8px; }
+    .segments-head h3 { margin: 0; }
+    .total-drift { font-weight: 600; white-space: nowrap; }
+
 
   `],
   template: `
@@ -72,25 +79,24 @@ type StateDto = BaseStateDto & {
           ago
         </small>
       </ng-container>
-      <ng-template #notStarted><b>Master Timer Ready</b></ng-template>
+      <ng-template #notStarted><b style="color:#3BB143">✅ Master Timer Ready (36 minutes) </b></ng-template>
     </div>
 
     <div *ngIf="state as s">
-    <p>
-      <b>Spanish Sermon End:</b>
-      ETA:
-      <ng-container *ngIf="spanishEtaSec(state) as eta; else etaDash">
-        <span [style.color]="etaColor(eta)">{{ eta | mmss }}</span>
-      
-      </ng-container>
-      <ng-template #etaDash>—</ng-template>
-      |
-      Final:
-      <ng-container *ngIf="state?.spanish?.sermonEndedAtSec as fin; else finDash">
-        {{ fin | mmss }}
-      </ng-container>
-      <ng-template #finDash>—</ng-template>
-    </p>
+  <p>
+  <b>Spanish Sermon Status:</b>
+  Time Left:
+  <ng-container *ngIf="spanishTimeLeftSec() as rem; else tlDash">
+    {{ rem | mmss }}
+  </ng-container>
+  <ng-template #tlDash>—</ng-template>
+  |
+  Sermon Ended At:
+  <ng-container *ngIf="state?.spanish?.sermonEndedAtSec as fin; else finDash">
+    {{ fin | mmss }}
+  </ng-container>
+  <ng-template #finDash>—</ng-template>
+</p>
 
       <!-- Offering: Planned + Predicted (drift-aware, 36:00 fallback) → Final on real stamp -->
   <!-- Offering: stable, no flipping -->
@@ -101,7 +107,9 @@ type StateDto = BaseStateDto & {
         <ng-container *ngIf="predictedLengthSec(s) as pl">
           Predicted: {{ pl | mmss }}
           <ng-container *ngIf="predictedExtensionSec(s) as ext">
-            — with {{ ext | mmss }} extension
+          <small style="opacity:.8; margin-left:8px"> (+{{ ext | mmss }} included in prediction)
+          </small>
+          
           </ng-container>
         </ng-container>
       </p>
@@ -115,7 +123,20 @@ type StateDto = BaseStateDto & {
         </button>
       </p>
 
-      <h3>Segments</h3>
+      <!-- Segments (wrapped so header width == table width) -->
+      <div class="segments-wrap">
+        <div class="segments-head">
+          <h3>Segments</h3>
+          <div class="total-drift">
+            <b>Total Drift:</b>
+            <span [style.color]="+(s.english.runningDriftBeforeOfferingSec ?? 0) < -4 ? 'red'
+                              : +(s.english.runningDriftBeforeOfferingSec ?? 0) >  4 ? 'black'
+                              : 'inherit'">
+              {{ s.english.runningDriftBeforeOfferingSec | signedmmss }}
+            </span>
+          </div>
+        </div>
+
       <table>
         <tr>
           <th>#</th><th>Segment</th><th>Planned</th><th>Actual</th>
@@ -163,14 +184,6 @@ type StateDto = BaseStateDto & {
         </tr>
       </table>
 
-      <p>
-        <b>Total Drift:</b>
-        <span [style.color]="+(s.english.runningDriftBeforeOfferingSec ?? 0) < -4 ? 'red'
-                          : +(s.english.runningDriftBeforeOfferingSec ?? 0) >  4 ? 'black'
-                          : 'inherit'">
-          {{ s.english.runningDriftBeforeOfferingSec | signedmmss }}
-        </span>
-      </p>
 
       <audio #etaChime preload="auto">
         <source src="assets/sounds/eta-chime.wav" type="audio/wav">
@@ -423,11 +436,13 @@ export class EnglishViewComponent implements OnInit {
     }, 5000);
   }
 
-  // Return ETA seconds from state (null if absent)
-  spanishEtaSec(s: StateDto | null): number | null {
-    const eta = (s as any)?.spanish?.sermonEndEtaSec;
-    return (typeof eta === 'number' && eta > 0) ? eta : null;
+  spanishEtaSec(s: any): number | null {
+    const manual = s?.spanish?.sermonEndEtaSec;
+    if (manual != null) return manual;   // manual override wins
+    // fallback: if you still have a computed ETA, return it; otherwise null
+    return null; // or: return this.computeSpanishEtaFromTimestamps(s);
   }
+
 
   // Color ETA red if later than 36:00, green if earlier; neutral if exactly 36:00
   etaColor(etaSec: number): string {
@@ -441,5 +456,23 @@ export class EnglishViewComponent implements OnInit {
     return etaSec - this.hub.masterTargetSec;
   }
 
+  private masterElapsedSec(): number | null {
+    const start = this.state?.masterStartAtUtc;
+    if (!start) return null;
+    const ms = this.hub.serverNowMs() - Date.parse(start);
+    return Math.max(0, Math.floor(ms / 1000));
+  }
+
+  spanishTimeLeftSec(): number | null {
+    const ended = this.state?.spanish?.sermonEndedAtSec;
+    if (ended != null && ended > 0) return 0;                  // ← freeze at 0 after final
+    const etaAbs = this.state?.spanish?.sermonEndEtaSec;
+    const now = this.masterElapsedSec();
+    if (etaAbs == null || now == null) return null;
+    return Math.max(0, etaAbs - now);
+  }
+
+
 
 }
+
