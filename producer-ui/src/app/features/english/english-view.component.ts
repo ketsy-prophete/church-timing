@@ -3,10 +3,17 @@ import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { SignalrService } from '../../core/services/signalr';
-import type { StateDto } from '../../core/services/signalr';
 import { TimePipe } from '../../shared/time.pipe';
 import { SignedTimePipe } from '../../shared/signed-time.pipe';
-import { interval, map, startWith } from 'rxjs';
+import { Observable, interval, map, startWith, combineLatest } from 'rxjs';
+import type { StateDto as BaseStateDto } from '../../core/services/signalr';
+import { ViewChild, ElementRef } from '@angular/core';
+
+type StateDto = BaseStateDto & {
+  spanish: BaseStateDto['spanish'] & {
+    sermonEndEtaSec?: number;  // locally add the ETA field
+  };
+};
 
 @Component({
   standalone: true,
@@ -21,21 +28,43 @@ import { interval, map, startWith } from 'rxjs';
     @keyframes pulse{0%{opacity:.4}50%{opacity:1}100%{opacity:.4}}
     table{border-collapse:collapse}
     th,td{padding:6px 8px;border:1px solid #ccc}
-    .highlight { background:#d0d0d0; transition: background-color 300ms ease-in-out; }
+    .dot.ended { background:#e53935; animation:none; }
+    .time-red { color:#e53935; }
+    .over{color:#000000}.under{color:#dc2626} /* fixed ## */
+    .actual-cell { min-width: 96px; }
+    .actual-primary { font-weight: 600; line-height: 1.1; }
+    .clock-time { font-weight:700; font-size:20px;}
+    .clock-date { font-weight:500; font-size:12px; opacity:.8; line-height:1.99; }
+    /* Non-blocking toast stack */
+    .toast-wrap{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:1000;pointer-events:none}
+    .toast{pointer-events:auto;background:#111;color:#fff;border-radius:6px;padding:10px 12px;box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:13px;border-left:4px solid transparent}
+    .toast small{opacity:.8}
+    /* Delta hint: earlier=green, later=red */
+    .toast.delta-early{border-left-color:#16a34a}
+    .toast.delta-late{border-left-color:#dc2626}
+
   `],
   template: `
   <div style="padding:16px; font-family:system-ui">
-
     <div class="titlebar">
       <h2>English Producer</h2>
-      <span class="clock">{{ etNow$ | async }} ET</span>
+      <div class="clock">
+        <div class="clock-time">{{ etNow$ | async }} ET</div>
+        <div class="clock-date">{{ etDate$ | async }}</div>
+      </div>
     </div>
 
     <!-- Live status / master countdown -->
-    <div class="bar">
-      <ng-container *ngIf="(hub.masterCountdown$ | async) as mc; else notStarted">
-        <span class="dot" [class.live]="!!state?.masterStartAtUtc"></span>
-        <b>Master T– {{ mc | mmss }}</b>
+    <div class="bar" *ngIf="vm$ | async as vm">
+      <ng-container *ngIf="vm.s?.masterStartAtUtc; else notStarted">
+        <span class="dot"
+              [class.live]="vm.mc > 0"
+              [class.ended]="vm.mc <= 0"></span>
+
+        <b [class.time-red]="vm.mc <= 0">
+          Master Timer – {{ (vm.mc > 0 ? vm.mc : 0) | mmss }}
+        </b>
+
         <small *ngIf="(hub.lastSyncAgo$ | async) as secs">
           Live • Updated
           <ng-container *ngIf="secs < 60">&lt;1m</ng-container>
@@ -47,68 +76,122 @@ import { interval, map, startWith } from 'rxjs';
     </div>
 
     <div *ngIf="state as s">
-      <p><b>Spanish Sermon End:</b> {{ s.spanish.sermonEndedAtSec | mmss }}</p>
+    <p>
+      <b>Spanish Sermon End:</b>
+      ETA:
+      <ng-container *ngIf="spanishEtaSec(state) as eta; else etaDash">
+        <span [style.color]="etaColor(eta)">{{ eta | mmss }}</span>
+      
+      </ng-container>
+      <ng-template #etaDash>—</ng-template>
+      |
+      Final:
+      <ng-container *ngIf="state?.spanish?.sermonEndedAtSec as fin; else finDash">
+        {{ fin | mmss }}
+      </ng-container>
+      <ng-template #finDash>—</ng-template>
+    </p>
 
-      <!-- Offering suggestion -->
-      <p><b>Offering Length:</b>
-        <ng-container *ngIf="s.offeringSuggestion.stretchSec === 0; else stretch">
-          {{ s.baseOfferingSec | mmss }} (Stay)
+      <!-- Offering: Planned + Predicted (drift-aware, 36:00 fallback) → Final on real stamp -->
+  <!-- Offering: stable, no flipping -->
+      <p>
+        <b>Offering Length:</b>
+        Planned: {{ s.baseOfferingSec | mmss }}
+        |
+        <ng-container *ngIf="predictedLengthSec(s) as pl">
+          Predicted: {{ pl | mmss }}
+          <ng-container *ngIf="predictedExtensionSec(s) as ext">
+            — with {{ ext | mmss }} extension
+          </ng-container>
         </ng-container>
-        <ng-template #stretch>
-          {{ s.offeringSuggestion.offeringTargetSec | mmss }}
-          — <em>(with {{ s.offeringSuggestion.stretchSec | mmss }} extension)</em>
-        </ng-template>
       </p>
 
+
+      <!-- Buttons -->
       <button (click)="startRun()" [disabled]="!!s.masterStartAtUtc">Start Run</button>
-      <p><button (click)="startOffering()">Start Offering</button></p>
+      <p>
+        <button (click)="startOffering()" [disabled]="offeringClicked || isOfferingLocked(s)">
+          Start Offering
+        </button>
+      </p>
 
       <h3>Segments</h3>
       <table>
         <tr>
-          <th>#</th><th>Segment</th><th>Planned</th><th>Actual</th><th>Segment Drift</th><th>Timer</th><th>Action</th>
+          <th>#</th><th>Segment</th><th>Planned</th><th>Actual</th>
+          <th>Segment Drift</th><th>Action</th><th>Ended</th>
         </tr>
 
-        <tr *ngFor="let seg of s.english.segments; let i = index"
-            [class.highlight]="seg.id === lastCompletedId">
+        <tr *ngFor="let seg of s.english.segments; let i = index">
           <td>{{ seg.order }}</td>
           <td>{{ seg.name }}</td>
           <td>{{ seg.plannedSec | mmss }}</td>
-          <td>{{ seg.actualSec  | mmss }}</td>
 
-          <!-- Drift: over=green, under=red (use tolerance ±4s; tweak if you prefer) -->
-          <td [style.color]="(seg.driftSec ?? 0) > 4 ? 'green'
-                           : (seg.driftSec ?? 0) < -4 ? 'red'
-                           : 'inherit'">
+          <!-- Actual (single bold line: live while active, then locked) -->
+          <td class="actual-cell">
+            <div class="actual-primary">
+              <!-- While this segment is active -->
+              <ng-container *ngIf="isActive(i, s.english.segments); else showLockedOrBlank">
+                {{ activeElapsedSec(i, s.english.segments) | mmss }}
+              </ng-container>
+
+              <!-- After completion: show locked actual; otherwise blank (future segment) -->
+              <ng-template #showLockedOrBlank>
+                <ng-container *ngIf="seg.completed">
+                  {{ seg.actualSec | mmss }}
+                </ng-container>
+              </ng-template>
+            </div>
+          </td>
+
+          <td [class.under]="+(seg.driftSec ?? 0) < -4">
             {{ seg.driftSec | signedmmss }}
           </td>
 
-          <!-- Timer: live for active segment; freeze to actual when completed -->
-          <td>
-            <span *ngIf="seg.completed; else liveOrDash">{{ seg.actualSec | mmss }}</span>
-            <ng-template #liveOrDash>
-              <span *ngIf="isActive(i, s.english.segments); else dash">
-                {{ activeElapsedSec(i, s.english.segments) | mmss }}
-              </span>
-              <ng-template #dash>—</ng-template>
-            </ng-template>
-          </td>
-
+          <!-- Action -->
           <td>
             <button (click)="complete(seg.id)" [disabled]="seg.completed">Complete</button>
+          </td>
+
+          <!-- Ended timestamp -->
+          <td>
+            <ng-container *ngIf="seg.completed; else dashEnded">
+              {{ endedAt(i, s.english.segments) | date:'h:mm a':'America/New_York' }}
+            </ng-container>
+            <ng-template #dashEnded>—</ng-template>
           </td>
         </tr>
       </table>
 
       <p>
         <b>Total Drift:</b>
-        <span
-          [style.color]="(s.english.runningDriftBeforeOfferingSec ?? 0) < -4 ? 'red'
-                        : (s.english.runningDriftBeforeOfferingSec ?? 0) >  4 ? 'green'
-                        : 'inherit'">
+        <span [style.color]="+(s.english.runningDriftBeforeOfferingSec ?? 0) < -4 ? 'red'
+                          : +(s.english.runningDriftBeforeOfferingSec ?? 0) >  4 ? 'black'
+                          : 'inherit'">
           {{ s.english.runningDriftBeforeOfferingSec | signedmmss }}
         </span>
       </p>
+
+      <audio #etaChime preload="auto">
+        <source src="assets/sounds/eta-chime.wav" type="audio/wav">
+      </audio>
+
+
+
+      <!-- ETA change toasts (non-blocking) -->
+      <div class="toast-wrap" aria-live="polite" aria-atomic="true">
+        <div class="toast"
+            *ngFor="let t of etaToasts"
+            [class.delta-early]="t.delta != null && t.delta < 0"
+            [class.delta-late]="t.delta != null && t.delta > 0">
+          <div><b>Spanish ETA updated</b></div>
+          <div>ETA: {{ t.sec | mmss }}</div>
+          <div *ngIf="t.delta != null">
+            <small>Change: {{ t.delta | signedmmss:true }}</small>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
   `
@@ -117,25 +200,121 @@ export class EnglishViewComponent implements OnInit {
   state: StateDto | null = null;
   private runId!: string;
 
+  vm$!: Observable<{ mc: number; s: StateDto | null }>;
+  offeringClicked = false;
+
   // track most-recently completed English segment (for row highlight)
   private prevCompletedIds = new Set<string>();
   lastCompletedId: string | null = null;
 
-  constructor(public hub: SignalrService, private route: ActivatedRoute) {}
+  constructor(public hub: SignalrService, private route: ActivatedRoute) { }
+
+  // ---- OFFERING / PREDICTED HELPERS ----
+
+  // find "Offering" row (case-insensitive)
+  private offeringIndex(s: StateDto): number {
+    return s.english.segments.findIndex(x => /offering/i.test(x.name));
+  }
+
+  // Planned time when Offering should start (sum planned prior to “Offering”)
+  private plannedOfferingStartSec(s: StateDto): number | null {
+    const idx = s.english.segments.findIndex(x => /offering/i.test(x.name));
+    if (idx < 0) return null;
+    let total = 0;
+    for (let i = 0; i < idx; i++) total += (s.english.segments[i].plannedSec ?? 0);
+    return total;
+  }
+
+  // Live projected start (planned + running drift from completed)
+  private projectedOfferingStartSec(s: StateDto): number | null {
+    const planned = this.plannedOfferingStartSec(s);
+    if (planned == null) return null;
+    const drift = +(s.english.runningDriftBeforeOfferingSec ?? 0);
+    return planned + drift;
+  }
+
+  // Prefer: real stamp > 0; else ETA > 0; else fallback target (36:00)
+  private spanishAnchorOrPlannedSec(s: StateDto): number {
+    const ended = s.spanish?.sermonEndedAtSec;
+    const eta = (s as any)?.spanish?.sermonEndEtaSec; // TS-safe during Phase 1
+    if (typeof ended === 'number' && ended > 0) return ended;
+    if (typeof eta === 'number' && eta > 0) return eta;
+    return this.hub.masterTargetSec; // 36:00 fallback
+  }
+
+  // Final only when REAL stamp exists (>0)
+  isFinalOfferingAvailable(s: StateDto): boolean {
+    return !!s.masterStartAtUtc
+      && typeof s.spanish?.sermonEndedAtSec === 'number'
+      && s.spanish!.sermonEndedAtSec > 0;
+  }
+
+  // Predicted (drift-aware; uses fallback/ETA/stamp anchor)
+  predictedOfferingLengthSec(s: StateDto): number | null {
+    const start = this.projectedOfferingStartSec(s);
+    if (start == null) return null;
+    const base = +(s.baseOfferingSec ?? 0);
+    const anchor = this.spanishAnchorOrPlannedSec(s);
+    const gap = Math.max(0, anchor - start);
+    return Math.max(base, gap);
+  }
+
+
+  // Predicted full length (never null: falls back to base)
+  predictedLengthSec(s: StateDto): number {
+    const base = +(s.baseOfferingSec ?? 0);
+    const start = this.projectedOfferingStartSec(s);
+    if (start == null) return base;
+    const gap = Math.max(0, this.anchorSec(s) - start);
+    return Math.max(base, gap);
+  }
+
+  // Predicted extension only (>= 0)
+  predictedExtensionSec(s: StateDto): number {
+    const ext = this.predictedLengthSec(s) - +(s.baseOfferingSec ?? 0);
+    return Math.max(0, ext);
+  }
+
+  // ---- END OFFERING HELPERS ----
 
   async ngOnInit() {
     this.runId = this.route.snapshot.params['id'];
     await this.hub.connect(this.runId);
     this.state = this.hub.state$.value;
 
+    this.vm$ = combineLatest([
+      this.hub.masterCountdown$.pipe(startWith(null as number | null)),
+      this.hub.state$.pipe(startWith(this.state))
+    ]).pipe(
+      map(([mc, s]) => ({ mc: mc ?? 0, s }))
+    );
+
     this.hub.state$.subscribe(s => {
       this.state = s;
       this.updateHighlight(s);
+
+      // Detect ETA changes (works even if ETA isn’t typed on StateDto)
+      const eta = (s as any)?.spanish?.sermonEndEtaSec;
+      if (typeof eta === 'number') {
+        this.onEtaUpdated(eta);
+      }
     });
   }
 
   startRun() { this.hub.startRun(this.runId); }
-  startOffering() { this.hub.startOffering(this.runId); }
+
+  startOffering() {
+    if (this.offeringClicked) return;
+    this.offeringClicked = true;
+    this.hub.startOffering(this.runId);
+  }
+
+  isOfferingLocked(s: StateDto): boolean {
+    const seg = s.english.segments.find(x => /offering/i.test(x.name));
+    if (!seg) return false;
+    return !!seg.completed || (seg.actualSec ?? 0) > 0;
+  }
+
   complete(id: string) { this.hub.completeSegment(this.runId, id); }
 
   // Live ET clock
@@ -147,7 +326,20 @@ export class EnglishViewComponent implements OnInit {
         hour: 'numeric',
         minute: '2-digit',
         hour12: true,
-      }).format(new Date()).replace(/\s/g, '')
+      }).format(new Date())
+    )
+  );
+
+  etDate$ = interval(1000).pipe(
+    startWith(0),
+    map(() =>
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+      }).format(new Date())
     )
   );
 
@@ -181,4 +373,73 @@ export class EnglishViewComponent implements OnInit {
 
     this.prevCompletedIds = completedIds;
   }
+
+  endedAt(idx: number, segs: StateDto['english']['segments']): Date | null {
+    if (!this.state?.masterStartAtUtc || !segs[idx]?.completed) return null;
+    let total = 0;
+    for (let i = 0; i <= idx; i++) total += (segs[i].actualSec ?? 0);
+    const endMs = Date.parse(this.state.masterStartAtUtc) + total * 1000;
+    return new Date(endMs);
+  }
+
+  // Which anchor to use: Final > ETA > 36:00 fallback
+  private anchorSec(s: StateDto): number {
+    const ended = s.spanish?.sermonEndedAtSec ?? 0;
+    const eta = (s as any)?.spanish?.sermonEndEtaSec ?? 0;
+    if (ended > 0) return ended;
+    if (eta > 0) return eta;
+    return this.hub.masterTargetSec; // 36:00
+  }
+
+  etaToasts: { id: number; sec: number; delta: number | null }[] = [];
+  private lastEtaSec: number | null = null;
+  private toastIdSeq = 1;
+  private lastToastAt = 0;
+
+  @ViewChild('etaChime') etaChime?: ElementRef<HTMLAudioElement>;
+
+  private async onEtaUpdated(newEtaSec: number) {
+    // ignore zeros/nulls and true duplicates
+    if (!(newEtaSec > 0)) return;
+    if (this.lastEtaSec != null && newEtaSec === this.lastEtaSec) return;
+
+    // simple throttle (avoid spam if backend bursts updates)
+    const now = Date.now();
+    if (now - this.lastToastAt < 800) return;
+    this.lastToastAt = now;
+
+    const delta = (this.lastEtaSec != null) ? (newEtaSec - this.lastEtaSec) : null;
+    this.lastEtaSec = newEtaSec;
+
+    const id = this.toastIdSeq++;
+    this.etaToasts.push({ id, sec: newEtaSec, delta });
+
+    // subtle chime (best-effort; browsers may require prior user interaction)
+    try { await this.etaChime?.nativeElement.play(); } catch { }
+
+    // auto-hide after 5s
+    setTimeout(() => {
+      this.etaToasts = this.etaToasts.filter(t => t.id !== id);
+    }, 5000);
+  }
+
+  // Return ETA seconds from state (null if absent)
+  spanishEtaSec(s: StateDto | null): number | null {
+    const eta = (s as any)?.spanish?.sermonEndEtaSec;
+    return (typeof eta === 'number' && eta > 0) ? eta : null;
+  }
+
+  // Color ETA red if later than 36:00, green if earlier; neutral if exactly 36:00
+  etaColor(etaSec: number): string {
+    if (etaSec > this.hub.masterTargetSec) return '#dc2626';  // red
+    if (etaSec < this.hub.masterTargetSec) return '#16a34a';  // green
+    return 'inherit';
+  }
+
+  // Difference vs the 36:00 target (positive = late, negative = early)
+  etaDeltaFromTarget(etaSec: number): number {
+    return etaSec - this.hub.masterTargetSec;
+  }
+
+
 }

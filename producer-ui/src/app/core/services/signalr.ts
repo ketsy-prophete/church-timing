@@ -11,7 +11,7 @@ export interface StateDto {
   preteachSec: number;
   walkBufferSec: number;
   baseOfferingSec: number;
-  spanish: { sermonEndedAtSec?: number };
+  spanish: { sermonEndedAtSec?: number; sermonEndEtaSec?: number }; // <-- include ETA here
   english: { segments: SegmentDto[]; runningDriftBeforeOfferingSec: number; offeringStartedAtSec?: number };
   offeringSuggestion: { stretchSec: number; offeringTargetSec: number };
 }
@@ -24,10 +24,10 @@ export class SignalrService {
 
   private serverOffsetMs = 0;   // <- singular
   private lastSyncAt = Date.now();
-  readonly masterTargetSec = 35 * 60;
+  readonly masterTargetSec = 36 * 60;
 
   serverNowMs() { return Date.now() - this.serverOffsetMs; }
-  
+
   async connect(runId: string) {
     if (this.connected) return;
 
@@ -74,4 +74,12 @@ export class SignalrService {
   completeSegment(runId: string, segmentId: string) {
     return this.hub!.invoke('CompleteSegment', runId, segmentId);
   }
+
+  // SignalrService
+  setSpanishEta(runId: string, etaSec: number) {
+    // Match your server’s hub method signature. Most likely: (runId, etaSec).
+    return this.hub!.invoke('SetSpanishEta', runId, etaSec);
+  }
+
+
 }
