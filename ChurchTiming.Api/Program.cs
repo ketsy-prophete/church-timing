@@ -77,6 +77,8 @@ public class RunState
 
     // Spanish
     public int? SermonEndedAtSec { get; set; } // seconds since master start
+    public int? SermonEndEtaSec { get; set; }
+
 
     // English
     public List<Segment> Segments { get; set; } = new();
@@ -169,6 +171,22 @@ public class ServiceSyncHub(RunRepository repo) : Hub<ISyncClient>
         await Clients.Group(GroupName(runId)).StateUpdated(StateDto.From(run));
     }
 
+    public async Task SetSpanishEta(Guid runId, int etaSec)
+    {
+        var run = repo.Get(runId);
+        if (run is null || run.MasterStartAtUtc is null)
+        {
+            await Clients.Caller.Error("Run not live or not found");
+            return;
+        }
+
+        // 0 means "clear"
+        run.SermonEndEtaSec = etaSec > 0 ? etaSec : null;
+
+        await Clients.Group(GroupName(runId)).StateUpdated(StateDto.From(run));
+    }
+
+
 }
 
 public record StateDto(
@@ -198,7 +216,7 @@ public record StateDto(
             r.PreteachSec,
             r.WalkBufferSec,
             r.BaseOfferingSec,
-            new SpanishDto(r.SermonEndedAtSec),
+            new SpanishDto(r.SermonEndedAtSec, r.SermonEndEtaSec),
             new EnglishDto(
                 r.Segments.Select(s => new SegmentDto(s.Id, s.Order, s.Name, s.PlannedSec, s.ActualSec, s.DriftSec, s.EndAtUtc is not null)).ToList(),
                 runningDrift,
@@ -217,7 +235,7 @@ public record StateDto(
     }
 }
 
-public record SpanishDto(int? SermonEndedAtSec);
+public record SpanishDto(int? SermonEndedAtSec, int? SermonEndEtaSec);
 public record EnglishDto(List<SegmentDto> Segments, int RunningDriftBeforeOfferingSec, int? OfferingStartedAtSec);
 public record SegmentDto(Guid Id, int Order, string Name, int PlannedSec, int? ActualSec, int? DriftSec, bool Completed);
 public record OfferingSuggestionDto(int StretchSec, int OfferingTargetSec);
