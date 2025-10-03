@@ -139,7 +139,14 @@ type StateDto = BaseStateDto & {
   <div style="margin-top:40px;">
   <p style="margin:8px 0 0 0;">
     <b>Sermon Ended At:</b>
-    {{ state?.spanish?.sermonEndedAtSec | mmss }}
+<ng-container *ngIf="state?.spanish?.sermonEndedAtSec as ended; else noneEnded">
+  {{ ended | mmss }}
+  <small style="margin-left:8px; opacity:.9">
+    ({{ spanishEndedAtWallTime() | date:'h:mm a':'America/New_York' }})
+  </small>
+</ng-container>
+<ng-template #noneEnded>—</ng-template>
+
   </p>
   </div>
   
@@ -339,6 +346,19 @@ export class SpanishViewComponent implements OnInit {
     const now = Math.max(0, Math.floor((this.hub.serverNowMs() - Date.parse(start)) / 1000));
     return Math.max(0, etaAbs - now);
   }
+
+  spanishEndedAtWallTime(): Date | null {
+    const endSec = this.state?.spanish?.sermonEndedAtSec;
+    const startStr = this.state?.masterStartAtUtc;
+
+    // Strict guards so TS knows both are valid
+    if (typeof endSec !== 'number' || endSec <= 0) return null;
+    if (!startStr) return null;
+
+    const startMs = Date.parse(startStr);
+    return new Date(startMs + endSec * 1000);
+  }
+
 
 
 }

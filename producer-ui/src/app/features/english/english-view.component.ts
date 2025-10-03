@@ -15,6 +15,13 @@ type StateDto = BaseStateDto & {
   };
 };
 
+interface EtaToast {
+  id: number;
+  remSec: number;          // countdown snapshot (e.g., 5:00 -> 300)
+  wall: Date;              // timestamp for display
+  deltaFromTarget: number; // neg = early, pos = late vs 36:00
+}
+
 @Component({
   standalone: true,
   selector: 'app-english-view',
@@ -42,16 +49,75 @@ type StateDto = BaseStateDto & {
     /* Delta hint: earlier=green, later=red */
     .toast.delta-early{border-left-color:#16a34a}
     .toast.delta-late{border-left-color:#dc2626}
+  
+/* Non-blocking toast stack */
+.toast-wrap{
+  position:fixed; right:16px; bottom:16px;
+  display:flex; flex-direction:column; gap:8px;
+  z-index:1000; pointer-events:none;
+}
+
+/* Base toast: reserve space for the close button and avoid overlap */
+.toast{
+  pointer-events:auto; position:relative;
+  background:#111; color:#fff; border-radius:6px;
+  padding:14px 36px 12px 12px;                 /* top right bottom left */
+  box-shadow:0 6px 24px rgba(0,0,0,.25);
+  font-size:13px;
+  border-left:4px solid transparent;           /* default; tinted by variants */
+}
+.toast small{ opacity:.8; }
+
+/* Delta hint: earlier=green, later=red */
+.toast.delta-early{ border-left-color:#16a34a; }
+.toast.delta-late{  border-left-color:#dc2626; }
+
+/* Sermon Ended alert: black strip on the LEFT (no ::after at all) */
+.toast.alert{
+  background:#dc2626; color:#fff;
+  position:relative;
+  padding:16px 36px 14px 12px;
+}
+
+/* Close button */
+.toast-close{
+  position:absolute; top:8px; right:10px;
+  background:transparent; border:none; cursor:pointer;
+  color:inherit; font-size:16px; line-height:1;
+}
+
+/* Extra safety: ensure first line never sits under the × */
+.toast > div:first-child{ display:block; padding-right:28px; }
+
+/* Container/event-pass-through helpers */
+.toast-wrap { pointer-events:none; }
+.toast      { pointer-events:auto; }
+
     /* Make header stop exactly above the table's right edge (i.e., above "Ended") */
     .segments-wrap { display: inline-block; }                  /* width collapses to table width */
     .segments-wrap table { width: auto; }                      /* ensure table doesn't stretch to 100% */
     .segments-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 16px 0 8px; }
     .segments-head h3 { margin: 0; }
     .total-drift { font-weight: 600; white-space: nowrap; }
+    /* Timestamp style for toasts */
+    .toast .stamp{
+      opacity:.72;       /* slightly lighter than main text */
+      display:block;
+      margin-top:4px;
+      font-style:italic;
+    }
+
 
 
   `],
   template: `
+
+  <!-- producer.component.html -->
+  <div style="padding:16px" class="toolbar">
+    <button routerLink="/rundown" class="btn btn-secondary">Open Service Rundown</button>
+  </div>
+  <!-- rest of producer template... -->
+
   <div style="padding:16px; font-family:system-ui">
     <div class="titlebar">
       <h2>English Producer</h2>
@@ -94,7 +160,12 @@ type StateDto = BaseStateDto & {
   Sermon Ended At:
   <ng-container *ngIf="state?.spanish?.sermonEndedAtSec as fin; else finDash">
     {{ fin | mmss }}
+    <small style="margin-left:8px; opacity:.9">
+      ({{ spanishEndedAtWallTime() | date:'h:mm a':'America/New_York' }})
+    </small>
   </ng-container>
+  <ng-template #finDash>—</ng-template>
+
   <ng-template #finDash>—</ng-template>
 </p>
 
@@ -191,22 +262,36 @@ type StateDto = BaseStateDto & {
 
 
 
-      <!-- ETA change toasts (non-blocking) -->
-      <div class="toast-wrap" aria-live="polite" aria-atomic="true">
-        <div class="toast"
-            *ngFor="let t of etaToasts"
-            [class.delta-early]="t.delta != null && t.delta < 0"
-            [class.delta-late]="t.delta != null && t.delta > 0">
-          <div><b>Spanish ETA updated</b></div>
-          <div>ETA: {{ t.sec | mmss }}</div>
-          <div *ngIf="t.delta != null">
-            <small>Change: {{ t.delta | signedmmss:true }}</small>
-          </div>
-        </div>
-      </div>
+<!-- Toasts (ETA + Sermon Ended) -->
+  <div class="toast-wrap" aria-live="polite" aria-atomic="true">
 
+  <!-- ETA change toasts -->
+  <div class="toast"
+      *ngFor="let t of etaToasts; trackBy: trackById"
+      [class.delta-early]="t.deltaFromTarget < 0"
+      [class.delta-late]="t.deltaFromTarget > 0">
+    <button class="toast-close" aria-label="Close"
+            (click)="closeEtaToast(t.id)">×</button>
+    <div><b>Spanish ETA updated</b></div>
+    <div>ETA: {{ t.remSec | mmss }}</div>
+    <small class="stamp"><i>{{ t.wall | date:'h:mm a':'America/New_York' }}</i></small>
+  </div>
+
+
+  <!-- Sermon Ended toasts -->
+  <div class="toast alert"
+      *ngFor="let t of sermonEndToasts; trackBy: trackById">
+    <button class="toast-close" aria-label="Close"
+            (click)="closeSermonEndToast(t.id)">×</button>
+    <div><b>Spanish Sermon Ended</b></div>
+    <div>
+      <small>Locked at T+{{ state?.spanish?.sermonEndedAtSec | mmss }}</small>
+      <small class="stamp"><i>{{ t.wall | date:'h:mm a':'America/New_York' }}</i></small>
     </div>
   </div>
+
+
+</div>
   `
 })
 export class EnglishViewComponent implements OnInit {
@@ -220,7 +305,9 @@ export class EnglishViewComponent implements OnInit {
   private prevCompletedIds = new Set<string>();
   lastCompletedId: string | null = null;
 
+
   constructor(public hub: SignalrService, private route: ActivatedRoute) { }
+
 
   // ---- OFFERING / PREDICTED HELPERS ----
 
@@ -311,6 +398,13 @@ export class EnglishViewComponent implements OnInit {
       if (typeof eta === 'number') {
         this.onEtaUpdated(eta);
       }
+
+      const end = s?.spanish?.sermonEndedAtSec ?? null;
+      if (typeof end === 'number' && end > 0 && end !== this.lastSermonEndSec) {
+        this.lastSermonEndSec = end;
+        this.pushSermonEndedToast();
+      }
+
     });
   }
 
@@ -404,37 +498,51 @@ export class EnglishViewComponent implements OnInit {
     return this.hub.masterTargetSec; // 36:00
   }
 
-  etaToasts: { id: number; sec: number; delta: number | null }[] = [];
-  private lastEtaSec: number | null = null;
+
+  // Store the remaining time snapshot (what the Spanish side entered) + timestamp
+  etaToasts: EtaToast[] = [];
+  private lastEtaAbsSec: number | null = null;
   private toastIdSeq = 1;
   private lastToastAt = 0;
+  sermonEndToasts: { id: number; wall: Date | null }[] = [];
+  private lastSermonEndSec: number | null = null;
 
   @ViewChild('etaChime') etaChime?: ElementRef<HTMLAudioElement>;
 
-  private async onEtaUpdated(newEtaSec: number) {
+  private async onEtaUpdated(newEtaAbsSec: number) {
     // ignore zeros/nulls and true duplicates
-    if (!(newEtaSec > 0)) return;
-    if (this.lastEtaSec != null && newEtaSec === this.lastEtaSec) return;
+    if (!(newEtaAbsSec > 0)) return;
+    if (this.lastEtaAbsSec != null && newEtaAbsSec === this.lastEtaAbsSec) return;
 
-    // simple throttle (avoid spam if backend bursts updates)
+    // rate-limit: ignore if within 800ms of last toast
+    // (helps if multiple updates arrive in quick succession)
+    // throttle
     const now = Date.now();
     if (now - this.lastToastAt < 800) return;
     this.lastToastAt = now;
 
-    const delta = (this.lastEtaSec != null) ? (newEtaSec - this.lastEtaSec) : null;
-    this.lastEtaSec = newEtaSec;
+    this.lastEtaAbsSec = newEtaAbsSec;
+
+    // compute the countdown snapshot to display (entered ETA relative to "now")
+    const nowElapsed = this.masterElapsedSec() ?? 0;                 // seconds since master start
+    const remSec = Math.max(0, Math.floor(newEtaAbsSec - nowElapsed)); // show 5:00 if they entered 5:00
+
+    // stripe logic vs 36:00 target
+    const deltaFromTarget = newEtaAbsSec - this.hub.masterTargetSec;
 
     const id = this.toastIdSeq++;
-    this.etaToasts.push({ id, sec: newEtaSec, delta });
+    const wall = new Date(this.hub.serverNowMs());
+    this.etaToasts = [...this.etaToasts, { id, remSec, wall, deltaFromTarget }];
 
-    // subtle chime (best-effort; browsers may require prior user interaction)
     try { await this.etaChime?.nativeElement.play(); } catch { }
-
-    // auto-hide after 5s
-    setTimeout(() => {
-      this.etaToasts = this.etaToasts.filter(t => t.id !== id);
-    }, 5000);
   }
+
+  private pushSermonEndedToast() {
+    const id = this.toastIdSeq++;
+    const wall = this.spanishEndedAtWallTime();
+    this.sermonEndToasts.push({ id, wall: wall ?? null });
+  }
+
 
   spanishEtaSec(s: any): number | null {
     const manual = s?.spanish?.sermonEndEtaSec;
@@ -472,6 +580,28 @@ export class EnglishViewComponent implements OnInit {
     return Math.max(0, etaAbs - now);
   }
 
+  spanishEndedAtWallTime(): Date | null {
+    const endSec = this.state?.spanish?.sermonEndedAtSec;
+    const startStr = this.state?.masterStartAtUtc;
+
+    // Strict guards so TS knows both are valid
+    if (typeof endSec !== 'number' || endSec <= 0) return null;
+    if (!startStr) return null;
+
+    const startMs = Date.parse(startStr);
+    return new Date(startMs + endSec * 1000);
+  }
+
+  closeEtaToast(id: number) {
+    this.etaToasts = this.etaToasts.filter(t => t.id !== id);
+  }
+
+  closeSermonEndToast(id: number) {
+    this.sermonEndToasts = this.sermonEndToasts.filter(t => t.id !== id);
+  }
+
+  // Optional: for *ngFor trackBy to reduce DOM churn
+  trackById(_: number, item: { id: number }) { return item.id; }
 
 
 }
