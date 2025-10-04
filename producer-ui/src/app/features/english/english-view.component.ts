@@ -1,5 +1,4 @@
 // src/app/features/english/english-view.ts
-import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { SignalrService } from '../../core/services/signalr';
@@ -7,9 +6,10 @@ import { TimePipe } from '../../shared/time.pipe';
 import { SignedTimePipe } from '../../shared/signed-time.pipe';
 import { Observable, interval, map, startWith, combineLatest, timer } from 'rxjs';
 import type { StateDto as BaseStateDto } from '../../core/services/signalr';
-import { ViewChild, ElementRef } from '@angular/core';
+import { Component, OnInit, ViewChild, ElementRef, TrackByFunction } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { auditTime } from 'rxjs/operators';
+import { RundownService } from '../../store/rundown.service';
 
 
 
@@ -117,7 +117,7 @@ interface EtaToast {
 export class EnglishViewComponent implements OnInit {
   nowSec$ = timer(0, 1000).pipe(map(() => Math.floor(Date.now() / 1000)));
   state: StateDto | null = null;
-  private runId!: string;
+  runId = '';
 
   vm$!: Observable<{ mc: number; s: StateDto | null }>;
   vmView$!: Observable<{ mc: number; s: StateDto | null }>;
@@ -129,7 +129,23 @@ export class EnglishViewComponent implements OnInit {
   lastCompletedId: string | null = null;
 
 
-  constructor(public hub: SignalrService, private route: ActivatedRoute) { }
+  connected = false;
+  connectErr: any = null;
+
+  // live rundown from the editor (safe: no “used before init”)
+  get doc$() { return this.store.doc$; }
+
+  // one reusable trackBy for everything
+  trackById: TrackByFunction<any> = (_: number, x) => x.id;
+
+
+
+
+  constructor(public hub: SignalrService, private route: ActivatedRoute, private store: RundownService) {
+
+  }
+
+
 
 
   // ---- OFFERING / PREDICTED HELPERS ----
@@ -203,43 +219,46 @@ export class EnglishViewComponent implements OnInit {
 
 
   async ngOnInit() {
-    this.runId = this.route.snapshot.params['id'];
-    await this.hub.connect(this.runId);
+    // --- Connect to SignalR run by :id from /runs/:id/english ---
+    this.runId = this.route.snapshot.paramMap.get('id') ?? '';
+    if (!this.runId) {
+      console.warn('Producer: no runId in route → live UI will be hidden; editor fallback can still show.');
+    } else {
+      try {
+        await this.hub.connect(this.runId);
+        this.connected = true;
+      } catch (e) {
+        this.connectErr = e;
+        console.error('Producer: SignalR connect failed', e);
+      }
+    }
+
     this.state = this.hub.state$.value;
 
-    this.vm$ = combineLatest([
-      this.hub.masterCountdown$.pipe(startWith(null as number | null)),
-      this.hub.state$.pipe(startWith(this.state))
-    ]).pipe(
-      map(([mc, s]) => ({ mc: mc ?? 0, s }))
-    );
-
-    // inside ngOnInit(), right after you set this.vm$
+    // View model streams (single assignment)
     this.vm$ = combineLatest([
       this.hub.masterCountdown$.pipe(startWith(null as number | null)),
       this.hub.state$.pipe(startWith(this.state))
     ]).pipe(map(([mc, s]) => ({ mc: mc ?? 0, s })));
 
-    this.vmView$ = this.vm$.pipe(auditTime(0));  // <-- fixes ExpressionChangedAfterItHasBeenChecked
+    this.vmView$ = this.vm$.pipe(auditTime(0)); // stabilize change detection
 
+    // Keep local state + toast logic in sync
     this.hub.state$.subscribe(s => {
       this.state = s;
       this.updateHighlight(s);
 
-      // Detect ETA changes (works even if ETA isn’t typed on StateDto)
       const eta = (s as any)?.spanish?.sermonEndEtaSec;
-      if (typeof eta === 'number') {
-        this.onEtaUpdated(eta);
-      }
+      if (typeof eta === 'number') this.onEtaUpdated(eta);
 
       const end = s?.spanish?.sermonEndedAtSec ?? null;
       if (typeof end === 'number' && end > 0 && end !== this.lastSermonEndSec) {
         this.lastSermonEndSec = end;
         this.pushSermonEndedToast();
       }
-
     });
   }
+
 
   startRun() { this.hub.startRun(this.runId); }
 
@@ -256,6 +275,7 @@ export class EnglishViewComponent implements OnInit {
   }
 
   complete(id: string) { this.hub.completeSegment(this.runId, id); }
+
 
   // Live ET clock
   etNow$ = interval(1000).pipe(
@@ -432,9 +452,6 @@ export class EnglishViewComponent implements OnInit {
   closeSermonEndToast(id: number) {
     this.sermonEndToasts = this.sermonEndToasts.filter(t => t.id !== id);
   }
-
-  // Optional: for *ngFor trackBy to reduce DOM churn
-  trackById(_: number, item: { id: number }) { return item.id; }
 
 
 }

@@ -1,0 +1,9 @@
+.cell-label {
+  display: block;
+  font-size: 0.72rem;
+  opacity: 0.75;
+  margin-bottom: 2px;
+}
+
+/* (Optional) keep table header visible while scrolling */
+.thead { position: sticky; top: 0; z-index: 1; }

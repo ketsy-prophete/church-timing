@@ -80,7 +80,7 @@ export class RundownService {
 
     reflowStarts() {
         const list = [...this.segments];
-        let cursor = 0;
+        let cursor = this.value.serviceStartSec; // ← start from service start
         for (const s of list) {
             s.startSec = cursor;
             cursor += Math.max(1, s.durationSec | 0);
@@ -110,10 +110,24 @@ export class RundownService {
 
     exportPretty(): string { return JSON.stringify(this.value, null, 2); }
     import(json: string) {
-        const parsed = JSON.parse(json) as RundownDoc;
+        const parsed = JSON.parse(json) as Partial<RundownDoc>;
         if (!parsed?.segments) throw new Error('Invalid JSON');
-        this.commit(parsed);
+        const segs = parsed.segments.map(s => ({
+            ...s,
+            id: Number(s.id),
+            startSec: Math.max(0, (s.startSec as number) | 0),
+            durationSec: Math.max(1, (s.durationSec as number) | 0),
+            title: s.title ?? ''
+        })) as RundownSegment[];
+        this.commit({
+            ...this.value,                  // preserve existing runId or other fields
+            serviceStartSec: Math.max(0, (parsed.serviceStartSec ?? this.value.serviceStartSec) | 0),
+            segments: segs
+        });
     }
+
+
+
 
     // --- internal ---
     private commit(doc: RundownDoc) {
@@ -132,4 +146,8 @@ export class RundownService {
     private blank(): RundownSegment {
         return { id: newId(), title: '', owner: '', startSec: 0, durationSec: 60, notes: '', color: '' };
     }
+
+    setRunId(id: string) { this.commit({ ...this.value, runId: id }); }
+    get runId() { return this.value.runId; }
+
 }

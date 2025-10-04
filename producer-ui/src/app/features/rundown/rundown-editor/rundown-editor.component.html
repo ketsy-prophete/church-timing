@@ -1,4 +1,6 @@
+
 <div class="rundown">
+  
   <header class="hdr">
     <div>
       <b>Service Rundown</b>
@@ -13,9 +15,9 @@
       <button type="button" (click)="reflowStarts()">Auto-fill starts</button>
       <button type="button" (click)="addSegment()">Add segment</button>
       <button type="button" (click)="clearAll()">Clear</button>
-      <button type="button" (click)="copyJson()">Copy JSON</button>
 
-      <!-- <button type="button" (click)="navigator.clipboard.writeText(exportPretty())">Copy JSON</button> -->
+      <!-- Hidden in v1 -->
+      <button *ngIf="!compact" type="button" (click)="copyJson()">Copy JSON</button>
     </div>
   </header>
 
@@ -23,58 +25,76 @@
     <div *ngFor="let w of overlapWarnings">⚠️ {{ w }}</div>
   </section>
 
-  <div class="table">
-    <div class="thead">
-      <div>#</div>
-      <div>Title</div>
-      <div>Owner</div>
-      <div>Start</div>
-      <div>Dur.</div>
-      <div>End</div>
-      <div>Notes</div>
-      <div>Actions</div>
-    </div>
+  <div class="rundown" [formGroup]="form">
+    <div class="table">
 
-    <div class="row" *ngFor="let g of segmentsArray.controls; let i = index" [style.--stripe]="g.value.color || '#5b9'">
-      <div class="idx">{{ i + 1 }}</div>
-
-      <input class="title" type="text" [formControl]="g.controls.title" placeholder="e.g., Worship Set">
-      <input class="owner" type="text" [formControl]="g.controls.owner" placeholder="Who leads?">
-
-      <!-- mm:ss everywhere -->
-      <div class="start">
-        <input class="num" type="number" [formControl]="g.controls.startSec" min="0">
-        <small class="muted">{{ (g.controls.startSec.value ?? 0) | mmss }}</small>
+      <!-- Hide the sticky header in v1 -->
+      <div class="thead" *ngIf="!compact">
+        <div>#</div>
+        <div>Title</div>
+        <div>Start</div>
+        <div>Dur.</div>
+        <div>End</div>
+        <div>Actions</div>
       </div>
 
-      <div class="dur">
-        <input class="num" type="number" [formControl]="g.controls.durationSec" min="1">
-        <small class="muted">{{ (g.controls.durationSec.value ?? 0) | mmss }}</small>
+      <div class="row" *ngFor="let g of segmentsArray.controls; let i = index; trackBy: trackBySegment" [formGroup]="g"
+        [style.--stripe]="g.value.color || '#5b9'">
+
+        <div class="idx">{{ i + 1 }}</div>
+
+        <!-- Title -->
+        <div class="cell">
+          <label class="cell-label" [attr.for]="'title-' + g.controls.id.value">Title</label>
+          <input class="title" [id]="'title-' + g.controls.id.value" type="text" formControlName="title"
+            placeholder="e.g., Worship Set">
+        </div>
+
+        <!-- Start -->
+        <div class="cell start">
+          <label class="cell-label" [attr.for]="'start-' + g.controls.id.value">Start (sec)</label>
+          <input class="num" [id]="'start-' + g.controls.id.value" type="number" formControlName="startSec" min="0"
+            [attr.aria-describedby]="'start-hint-' + g.controls.id.value">
+          <small class="muted" [id]="'start-hint-' + g.controls.id.value">
+            {{ g.controls.startSec.value | mmss }}
+          </small>
+        </div>
+
+        <!-- Duration -->
+        <div class="cell dur">
+          <label class="cell-label" [attr.for]="'dur-' + g.controls.id.value">Duration (sec)</label>
+          <input class="num" [id]="'dur-' + g.controls.id.value" type="number" formControlName="durationSec" min="1"
+            [attr.aria-describedby]="'dur-hint-' + g.controls.id.value">
+          <small class="muted" [id]="'dur-hint-' + g.controls.id.value">
+            {{ g.controls.durationSec.value | mmss }}
+          </small>
+        </div>
+
+        <!-- End (read-only) -->
+        <div class="cell end">
+          <label class="cell-label">End</label>
+          <div>{{ (g.controls.startSec.value + g.controls.durationSec.value) | mmss }}</div>
+        </div>
+
+        <div class="actions">
+          <button type="button" title="Duplicate" (click)="duplicate(i)">⎘</button>
+          <button type="button" title="Up" (click)="moveUp(i)">▲</button>
+          <button type="button" title="Down" (click)="moveDown(i)">▼</button>
+          <button type="button" title="Delete" (click)="remove(i)">✕</button>
+        </div>
       </div>
 
-      <div class="end">
-        {{ ((g.controls.startSec.value ?? 0) + (g.controls.durationSec.value ?? 0)) | mmss }}
-      </div>
-
-      <input class="notes" type="text" [formControl]="g.controls.notes" placeholder="notes">
-
-      <div class="actions">
-        <button type="button" title="Duplicate" (click)="duplicate(i)">⎘</button>
-        <button type="button" title="Up" (click)="moveUp(i)">▲</button>
-        <button type="button" title="Down" (click)="moveDown(i)">▼</button>
-        <button type="button" title="Delete" (click)="remove(i)">✕</button>
-      </div>
+      <!-- Hidden Import in v1 -->
+      <footer class="ftr" *ngIf="!compact">
+        <div>Total: <b>{{ totalSec | mmss }}</b> ({{ (totalSec/60) | number:'1.0-0' }} min)</div>
+        <details>
+          <summary>Import JSON</summary>
+          <textarea #json rows="6" placeholder='{"serviceStartSec":0,"segments":[...]}'></textarea>
+          <div class="row gap">
+            <button type="button" (click)="import(json.value)">Import</button>
+          </div>
+        </details>
+      </footer>
     </div>
   </div>
-
-  <footer class="ftr">
-    <div>Total: <b>{{ totalSec | mmss }}</b> ({{ (totalSec/60) | number:'1.0-0' }} min)</div>
-    <details>
-      <summary>Import JSON</summary>
-      <textarea #json rows="6" placeholder='{"serviceStartSec":0,"segments":[...]}'></textarea>
-      <div class="row gap">
-        <button type="button" (click)="import(json.value)">Import</button>
-      </div>
-    </details>
-  </footer>
 </div>
