@@ -1,0 +1,14 @@
+// src/app/shared/shared.module.ts
+import { NgModule } from '@angular/core';
+import { CommonModule } from '@angular/common';
+
+// Adjust these import names/paths to your actual pipe filenames/classes:
+import { TimePipe } from './time.pipe';            // @Pipe({ name: 'mmss' })
+import { SignedTimePipe } from './signed-time.pipe';
+
+@NgModule({
+  declarations: [TimePipe, SignedTimePipe],
+  imports: [CommonModule],
+  exports: [CommonModule, TimePipe, SignedTimePipe],
+})
+export class SharedModule {}

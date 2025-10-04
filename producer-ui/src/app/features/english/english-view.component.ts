@@ -5,9 +5,13 @@ import { ActivatedRoute } from '@angular/router';
 import { SignalrService } from '../../core/services/signalr';
 import { TimePipe } from '../../shared/time.pipe';
 import { SignedTimePipe } from '../../shared/signed-time.pipe';
-import { Observable, interval, map, startWith, combineLatest } from 'rxjs';
+import { Observable, interval, map, startWith, combineLatest, timer } from 'rxjs';
 import type { StateDto as BaseStateDto } from '../../core/services/signalr';
 import { ViewChild, ElementRef } from '@angular/core';
+import { RouterLink } from '@angular/router';
+import { auditTime } from 'rxjs/operators';
+
+
 
 type StateDto = BaseStateDto & {
   spanish: BaseStateDto['spanish'] & {
@@ -25,7 +29,8 @@ interface EtaToast {
 @Component({
   standalone: true,
   selector: 'app-english-view',
-  imports: [CommonModule, TimePipe, SignedTimePipe],
+  imports: [CommonModule, TimePipe, SignedTimePipe, RouterLink],
+  templateUrl: './english-view.component.html',
   styles: [`
     .titlebar { display:flex; align-items:center; }
     .clock { margin-left:auto; font-weight:600; white-space:nowrap; }
@@ -106,199 +111,17 @@ interface EtaToast {
       margin-top:4px;
       font-style:italic;
     }
-
-
-
   `],
-  template: `
 
-  <!-- producer.component.html -->
-  <div style="padding:16px" class="toolbar">
-    <button routerLink="/rundown" class="btn btn-secondary">Open Service Rundown</button>
-  </div>
-  <!-- rest of producer template... -->
-
-  <div style="padding:16px; font-family:system-ui">
-    <div class="titlebar">
-      <h2>English Producer</h2>
-      <div class="clock">
-        <div class="clock-time">{{ etNow$ | async }} ET</div>
-        <div class="clock-date">{{ etDate$ | async }}</div>
-      </div>
-    </div>
-
-    <!-- Live status / master countdown -->
-    <div class="bar" *ngIf="vm$ | async as vm">
-      <ng-container *ngIf="vm.s?.masterStartAtUtc; else notStarted">
-        <span class="dot"
-              [class.live]="vm.mc > 0"
-              [class.ended]="vm.mc <= 0"></span>
-
-        <b [class.time-red]="vm.mc <= 0">
-          Master Timer – {{ (vm.mc > 0 ? vm.mc : 0) | mmss }}
-        </b>
-
-        <small *ngIf="(hub.lastSyncAgo$ | async) as secs">
-          Live • Updated
-          <ng-container *ngIf="secs < 60">&lt;1m</ng-container>
-          <ng-container *ngIf="secs >= 60">{{ (secs/60) | number:'1.0-0' }}m</ng-container>
-          ago
-        </small>
-      </ng-container>
-      <ng-template #notStarted><b style="color:#3BB143">✅ Master Timer Ready (36 minutes) </b></ng-template>
-    </div>
-
-    <div *ngIf="state as s">
-  <p>
-  <b>Spanish Sermon Status:</b>
-  Time Left:
-  <ng-container *ngIf="spanishTimeLeftSec() as rem; else tlDash">
-    {{ rem | mmss }}
-  </ng-container>
-  <ng-template #tlDash>—</ng-template>
-  |
-  Sermon Ended At:
-  <ng-container *ngIf="state?.spanish?.sermonEndedAtSec as fin; else finDash">
-    {{ fin | mmss }}
-    <small style="margin-left:8px; opacity:.9">
-      ({{ spanishEndedAtWallTime() | date:'h:mm a':'America/New_York' }})
-    </small>
-  </ng-container>
-  <ng-template #finDash>—</ng-template>
-
-  <ng-template #finDash>—</ng-template>
-</p>
-
-      <!-- Offering: Planned + Predicted (drift-aware, 36:00 fallback) → Final on real stamp -->
-  <!-- Offering: stable, no flipping -->
-      <p>
-        <b>Offering Length:</b>
-        Planned: {{ s.baseOfferingSec | mmss }}
-        |
-        <ng-container *ngIf="predictedLengthSec(s) as pl">
-          Predicted: {{ pl | mmss }}
-          <ng-container *ngIf="predictedExtensionSec(s) as ext">
-          <small style="opacity:.8; margin-left:8px"> (+{{ ext | mmss }} included in prediction)
-          </small>
-          
-          </ng-container>
-        </ng-container>
-      </p>
-
-
-      <!-- Buttons -->
-      <button (click)="startRun()" [disabled]="!!s.masterStartAtUtc">Start Run</button>
-      <p>
-        <button (click)="startOffering()" [disabled]="offeringClicked || isOfferingLocked(s)">
-          Start Offering
-        </button>
-      </p>
-
-      <!-- Segments (wrapped so header width == table width) -->
-      <div class="segments-wrap">
-        <div class="segments-head">
-          <h3>Segments</h3>
-          <div class="total-drift">
-            <b>Total Drift:</b>
-            <span [style.color]="+(s.english.runningDriftBeforeOfferingSec ?? 0) < -4 ? 'red'
-                              : +(s.english.runningDriftBeforeOfferingSec ?? 0) >  4 ? 'black'
-                              : 'inherit'">
-              {{ s.english.runningDriftBeforeOfferingSec | signedmmss }}
-            </span>
-          </div>
-        </div>
-
-      <table>
-        <tr>
-          <th>#</th><th>Segment</th><th>Planned</th><th>Actual</th>
-          <th>Segment Drift</th><th>Action</th><th>Ended</th>
-        </tr>
-
-        <tr *ngFor="let seg of s.english.segments; let i = index">
-          <td>{{ seg.order }}</td>
-          <td>{{ seg.name }}</td>
-          <td>{{ seg.plannedSec | mmss }}</td>
-
-          <!-- Actual (single bold line: live while active, then locked) -->
-          <td class="actual-cell">
-            <div class="actual-primary">
-              <!-- While this segment is active -->
-              <ng-container *ngIf="isActive(i, s.english.segments); else showLockedOrBlank">
-                {{ activeElapsedSec(i, s.english.segments) | mmss }}
-              </ng-container>
-
-              <!-- After completion: show locked actual; otherwise blank (future segment) -->
-              <ng-template #showLockedOrBlank>
-                <ng-container *ngIf="seg.completed">
-                  {{ seg.actualSec | mmss }}
-                </ng-container>
-              </ng-template>
-            </div>
-          </td>
-
-          <td [class.under]="+(seg.driftSec ?? 0) < -4">
-            {{ seg.driftSec | signedmmss }}
-          </td>
-
-          <!-- Action -->
-          <td>
-            <button (click)="complete(seg.id)" [disabled]="seg.completed">Complete</button>
-          </td>
-
-          <!-- Ended timestamp -->
-          <td>
-            <ng-container *ngIf="seg.completed; else dashEnded">
-              {{ endedAt(i, s.english.segments) | date:'h:mm a':'America/New_York' }}
-            </ng-container>
-            <ng-template #dashEnded>—</ng-template>
-          </td>
-        </tr>
-      </table>
-
-
-      <audio #etaChime preload="auto">
-        <source src="assets/sounds/eta-chime.wav" type="audio/wav">
-      </audio>
-
-
-
-<!-- Toasts (ETA + Sermon Ended) -->
-  <div class="toast-wrap" aria-live="polite" aria-atomic="true">
-
-  <!-- ETA change toasts -->
-  <div class="toast"
-      *ngFor="let t of etaToasts; trackBy: trackById"
-      [class.delta-early]="t.deltaFromTarget < 0"
-      [class.delta-late]="t.deltaFromTarget > 0">
-    <button class="toast-close" aria-label="Close"
-            (click)="closeEtaToast(t.id)">×</button>
-    <div><b>Spanish ETA updated</b></div>
-    <div>ETA: {{ t.remSec | mmss }}</div>
-    <small class="stamp"><i>{{ t.wall | date:'h:mm a':'America/New_York' }}</i></small>
-  </div>
-
-
-  <!-- Sermon Ended toasts -->
-  <div class="toast alert"
-      *ngFor="let t of sermonEndToasts; trackBy: trackById">
-    <button class="toast-close" aria-label="Close"
-            (click)="closeSermonEndToast(t.id)">×</button>
-    <div><b>Spanish Sermon Ended</b></div>
-    <div>
-      <small>Locked at T+{{ state?.spanish?.sermonEndedAtSec | mmss }}</small>
-      <small class="stamp"><i>{{ t.wall | date:'h:mm a':'America/New_York' }}</i></small>
-    </div>
-  </div>
-
-
-</div>
-  `
 })
 export class EnglishViewComponent implements OnInit {
+  nowSec$ = timer(0, 1000).pipe(map(() => Math.floor(Date.now() / 1000)));
   state: StateDto | null = null;
   private runId!: string;
 
   vm$!: Observable<{ mc: number; s: StateDto | null }>;
+  vmView$!: Observable<{ mc: number; s: StateDto | null }>;
+
   offeringClicked = false;
 
   // track most-recently completed English segment (for row highlight)
@@ -377,6 +200,8 @@ export class EnglishViewComponent implements OnInit {
 
   // ---- END OFFERING HELPERS ----
 
+
+
   async ngOnInit() {
     this.runId = this.route.snapshot.params['id'];
     await this.hub.connect(this.runId);
@@ -388,6 +213,14 @@ export class EnglishViewComponent implements OnInit {
     ]).pipe(
       map(([mc, s]) => ({ mc: mc ?? 0, s }))
     );
+
+    // inside ngOnInit(), right after you set this.vm$
+    this.vm$ = combineLatest([
+      this.hub.masterCountdown$.pipe(startWith(null as number | null)),
+      this.hub.state$.pipe(startWith(this.state))
+    ]).pipe(map(([mc, s]) => ({ mc: mc ?? 0, s })));
+
+    this.vmView$ = this.vm$.pipe(auditTime(0));  // <-- fixes ExpressionChangedAfterItHasBeenChecked
 
     this.hub.state$.subscribe(s => {
       this.state = s;

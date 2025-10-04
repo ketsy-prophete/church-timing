@@ -1,5 +1,5 @@
+// src/app/shared/time.pipe.ts
 import { Pipe, PipeTransform } from '@angular/core';
-
 @Pipe({ name: 'mmss', standalone: true })
 export class TimePipe implements PipeTransform {
   transform(sec?: number | null): string {
@@ -10,5 +10,3 @@ export class TimePipe implements PipeTransform {
     return `${m}:${r}`;
   }
 }
-
-

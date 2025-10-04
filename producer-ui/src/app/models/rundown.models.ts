@@ -7,8 +7,8 @@ export interface RundownSegment {
   notes?: string;
   color?: string;
 }
-
 export interface RundownDoc {
-  serviceStartSec: number;     // offset from service start (usually 0)
+  runId?: string;
+  serviceStartSec: number;
   segments: RundownSegment[];
 }

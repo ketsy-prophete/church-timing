@@ -1,0 +1,19 @@
+// src/app/features/rundown/rundown.module.ts
+import { NgModule } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule, ReactiveFormsModule } from '@angular/forms';
+import { RundownRoutingModule } from './rundown-routing.module';
+import { RundownEditorComponent } from './rundown-editor/rundown-editor.component';
+import { SharedModule } from '../../shared/shared.module'; // exports your mmss pipe
+
+@NgModule({
+  declarations: [RundownEditorComponent],
+  imports: [
+    CommonModule,        // <- enables built-in pipes like number
+    FormsModule,
+    ReactiveFormsModule, // <- fixes [formControl]
+    SharedModule,        // <- makes mmss available
+    RundownRoutingModule
+  ],
+})
+export class RundownModule {}

@@ -1,0 +1,80 @@
+<div class="rundown">
+  <header class="hdr">
+    <div>
+      <b>Service Rundown</b>
+      <small class="muted">Create and sequence segments with times</small>
+    </div>
+
+    <div class="row gap">
+      <label>Service start offset (sec):
+        <input type="number" [formControl]="form.controls.serviceStart" min="0">
+      </label>
+
+      <button type="button" (click)="reflowStarts()">Auto-fill starts</button>
+      <button type="button" (click)="addSegment()">Add segment</button>
+      <button type="button" (click)="clearAll()">Clear</button>
+      <button type="button" (click)="copyJson()">Copy JSON</button>
+
+      <!-- <button type="button" (click)="navigator.clipboard.writeText(exportPretty())">Copy JSON</button> -->
+    </div>
+  </header>
+
+  <section *ngIf="overlapWarnings.length" class="warn">
+    <div *ngFor="let w of overlapWarnings">⚠️ {{ w }}</div>
+  </section>
+
+  <div class="table">
+    <div class="thead">
+      <div>#</div>
+      <div>Title</div>
+      <div>Owner</div>
+      <div>Start</div>
+      <div>Dur.</div>
+      <div>End</div>
+      <div>Notes</div>
+      <div>Actions</div>
+    </div>
+
+    <div class="row" *ngFor="let g of segmentsArray.controls; let i = index" [style.--stripe]="g.value.color || '#5b9'">
+      <div class="idx">{{ i + 1 }}</div>
+
+      <input class="title" type="text" [formControl]="g.controls.title" placeholder="e.g., Worship Set">
+      <input class="owner" type="text" [formControl]="g.controls.owner" placeholder="Who leads?">
+
+      <!-- mm:ss everywhere -->
+      <div class="start">
+        <input class="num" type="number" [formControl]="g.controls.startSec" min="0">
+        <small class="muted">{{ (g.controls.startSec.value ?? 0) | mmss }}</small>
+      </div>
+
+      <div class="dur">
+        <input class="num" type="number" [formControl]="g.controls.durationSec" min="1">
+        <small class="muted">{{ (g.controls.durationSec.value ?? 0) | mmss }}</small>
+      </div>
+
+      <div class="end">
+        {{ ((g.controls.startSec.value ?? 0) + (g.controls.durationSec.value ?? 0)) | mmss }}
+      </div>
+
+      <input class="notes" type="text" [formControl]="g.controls.notes" placeholder="notes">
+
+      <div class="actions">
+        <button type="button" title="Duplicate" (click)="duplicate(i)">⎘</button>
+        <button type="button" title="Up" (click)="moveUp(i)">▲</button>
+        <button type="button" title="Down" (click)="moveDown(i)">▼</button>
+        <button type="button" title="Delete" (click)="remove(i)">✕</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="ftr">
+    <div>Total: <b>{{ totalSec | mmss }}</b> ({{ (totalSec/60) | number:'1.0-0' }} min)</div>
+    <details>
+      <summary>Import JSON</summary>
+      <textarea #json rows="6" placeholder='{"serviceStartSec":0,"segments":[...]}'></textarea>
+      <div class="row gap">
+        <button type="button" (click)="import(json.value)">Import</button>
+      </div>
+    </details>
+  </footer>
+</div>

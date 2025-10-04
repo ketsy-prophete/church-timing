@@ -1,8 +1,7 @@
+// src/app/shared/signed-time.pipe.ts
 import { Pipe, PipeTransform } from '@angular/core';
-
 @Pipe({ name: 'signedmmss', standalone: true })
 export class SignedTimePipe implements PipeTransform {
-  // plusForZero=false → 00:00; set true to force +00:00
   transform(sec?: number | null, plusForZero = false): string {
     if (sec == null) return '—';
     const n = Math.floor(sec);
@@ -13,4 +12,3 @@ export class SignedTimePipe implements PipeTransform {
     return `${sign}${m}:${s}`;
   }
 }
-
