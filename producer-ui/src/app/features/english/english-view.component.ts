@@ -1,22 +1,20 @@
-// src/app/features/english/english-view.ts
+// src/app/features/english/english-view.component.ts
+import { Component, OnInit, OnDestroy, ViewChild, ElementRef, TrackByFunction, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
+import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
+import { Observable, Subscription, combineLatest, interval, timer } from 'rxjs';
+import { map, startWith, auditTime } from 'rxjs/operators';
+
 import { SignalrService } from '../../core/services/signalr';
+import type { StateDto as BaseStateDto } from '../../core/services/signalr';
 import { TimePipe } from '../../shared/time.pipe';
 import { SignedTimePipe } from '../../shared/signed-time.pipe';
-import { Observable, interval, map, startWith, combineLatest, timer } from 'rxjs';
-import type { StateDto as BaseStateDto } from '../../core/services/signalr';
-import { Component, OnInit, ViewChild, ElementRef, TrackByFunction } from '@angular/core';
-import { RouterLink } from '@angular/router';
-import { auditTime } from 'rxjs/operators';
 import { RundownService } from '../../store/rundown.service';
 
-
-
-type StateDto = BaseStateDto & {
-  spanish: BaseStateDto['spanish'] & {
-    sermonEndEtaSec?: number;  // locally add the ETA field
-  };
+// ---------- Local types ----------
+type ViewStateDto = BaseStateDto & {
+  spanish: BaseStateDto['spanish'] & { sermonEndEtaSec?: number };
 };
 
 interface EtaToast {
@@ -29,255 +27,128 @@ interface EtaToast {
 @Component({
   standalone: true,
   selector: 'app-english-view',
-  imports: [CommonModule, TimePipe, SignedTimePipe, RouterLink],
+  imports: [CommonModule, RouterLink, ReactiveFormsModule, TimePipe, SignedTimePipe],
   templateUrl: './english-view.component.html',
   styles: [`
-    .titlebar { display:flex; align-items:center; }
-    .clock { margin-left:auto; font-weight:600; white-space:nowrap; }
-    .bar{display:flex;gap:12px;align-items:center;margin:8px 0}
-    .dot{width:8px;height:8px;border-radius:50%;background:#bbb;display:inline-block;margin-left:6px}
-    .dot.live{background:#2ecc71;animation:pulse 1s infinite}
-    @keyframes pulse{0%{opacity:.4}50%{opacity:1}100%{opacity:.4}}
-    table{border-collapse:collapse}
-    th,td{padding:6px 8px;border:1px solid #ccc}
+    /* ---- Layout basics ---- */
+    .bar { display:flex; gap:12px; align-items:center; margin:8px 0; }
+    table { border-collapse:collapse; }
+    th, td { padding:6px 8px; border:1px solid #ccc; }
+
+    /* ---- Titlebar / live dot / clocks ---- */
+    .titlebar { display:flex; align-items:center; gap:12px; }
+    .titlebar h2 { margin:0; }
+    .dot { width:8px; height:8px; border-radius:50%; background:#bbb; display:inline-block; margin-left:6px; }
+    .dot.live { background:#2ecc71; animation:pulse 1s infinite; }
     .dot.ended { background:#e53935; animation:none; }
-    .time-red { color:#e53935; }
-    .over{color:#000000}.under{color:#dc2626} /* fixed ## */
-    .actual-cell { min-width: 96px; }
-    .actual-primary { font-weight: 600; line-height: 1.1; }
-    .clock-time { font-weight:700; font-size:20px;}
-    .clock-date { font-weight:500; font-size:12px; opacity:.8; line-height:1.99; }
-    /* Non-blocking toast stack */
-    .toast-wrap{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:1000;pointer-events:none}
-    .toast{pointer-events:auto;background:#111;color:#fff;border-radius:6px;padding:10px 12px;box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:13px;border-left:4px solid transparent}
-    .toast small{opacity:.8}
-    /* Delta hint: earlier=green, later=red */
-    .toast.delta-early{border-left-color:#16a34a}
-    .toast.delta-late{border-left-color:#dc2626}
-  
-/* Non-blocking toast stack */
-.toast-wrap{
-  position:fixed; right:16px; bottom:16px;
-  display:flex; flex-direction:column; gap:8px;
-  z-index:1000; pointer-events:none;
-}
 
-/* Base toast: reserve space for the close button and avoid overlap */
-.toast{
-  pointer-events:auto; position:relative;
-  background:#111; color:#fff; border-radius:6px;
-  padding:14px 36px 12px 12px;                 /* top right bottom left */
-  box-shadow:0 6px 24px rgba(0,0,0,.25);
-  font-size:13px;
-  border-left:4px solid transparent;           /* default; tinted by variants */
-}
-.toast small{ opacity:.8; }
-
-/* Delta hint: earlier=green, later=red */
-.toast.delta-early{ border-left-color:#16a34a; }
-.toast.delta-late{  border-left-color:#dc2626; }
-
-/* Sermon Ended alert: black strip on the LEFT (no ::after at all) */
-.toast.alert{
-  background:#dc2626; color:#fff;
-  position:relative;
-  padding:16px 36px 14px 12px;
-}
-
-/* Close button */
-.toast-close{
-  position:absolute; top:8px; right:10px;
-  background:transparent; border:none; cursor:pointer;
-  color:inherit; font-size:16px; line-height:1;
-}
-
-/* Extra safety: ensure first line never sits under the × */
-.toast > div:first-child{ display:block; padding-right:28px; }
-
-/* Container/event-pass-through helpers */
-.toast-wrap { pointer-events:none; }
-.toast      { pointer-events:auto; }
-
-    /* Make header stop exactly above the table's right edge (i.e., above "Ended") */
-    .segments-wrap { display: inline-block; }                  /* width collapses to table width */
-    .segments-wrap table { width: auto; }                      /* ensure table doesn't stretch to 100% */
-    .segments-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 16px 0 8px; }
-    .segments-head h3 { margin: 0; }
-    .total-drift { font-weight: 600; white-space: nowrap; }
-    /* Timestamp style for toasts */
-    .toast .stamp{
-      opacity:.72;       /* slightly lighter than main text */
-      display:block;
-      margin-top:4px;
-      font-style:italic;
+    .clock {
+      margin-left:auto;
+      display:flex;
+      align-items:flex-end;
+      gap:12px;      /* separates the stack and the "last sync" label */
+      font-weight:400;
     }
+    .clock .stack {
+      display:flex;
+      flex-direction:column;
+      align-items:flex-end;
+      line-height:1.15;
+    }
+    .clock-time { font-weight:700; font-size:20px; line-height:1; }
+    .clock-date { font-weight:500; font-size:12px; opacity:.8; line-height:1.2; }
+    .last-sync  { white-space:nowrap; opacity:.8; align-self:flex-end; }
+
+    @keyframes pulse { 0%{opacity:.4} 50%{opacity:1} 100%{opacity:.4} }
+
+    /* ---- Segments table / states ---- */
+    .segments-wrap { display:inline-block; }
+    .segments-wrap table { width:auto; }
+    .segments-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin:16px 0 8px; }
+    .segments-head h3 { margin:0; }
+    .total-drift { font-weight:600; white-space:nowrap; }
+
+    .time-red { color:#e53935; }
+    .over { color:#000000; }
+    .under { color:#dc2626; }
+    .actual-cell { min-width:96px; }
+    .actual-primary { font-weight:600; line-height:1.1; }
+
+    /* ---- Toasts ---- */
+    .toast-wrap { position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; z-index:1000; pointer-events:none; }
+    .toast { pointer-events:auto; position:relative; background:#111; color:#fff; border-radius:6px; padding:14px 36px 12px 12px; box-shadow:0 6px 24px rgba(0,0,0,.25); font-size:13px; border-left:4px solid transparent; }
+    .toast.small { padding:10px 12px; }
+    .toast small { opacity:.8; }
+    .toast.delta-early { border-left-color:#16a34a; }
+    .toast.delta-late  { border-left-color:#dc2626; }
+    .toast.alert { background:#dc2626; color:#fff; }
+    .toast-close { position:absolute; top:8px; right:10px; background:transparent; border:none; cursor:pointer; color:inherit; font-size:16px; line-height:1; }
+    .toast > div:first-child { display:block; padding-right:28px; }
+    .toast .stamp { opacity:.72; display:block; margin-top:4px; font-style:italic; }
   `],
-
 })
-export class EnglishViewComponent implements OnInit {
-  nowSec$ = timer(0, 1000).pipe(map(() => Math.floor(Date.now() / 1000)));
-  state: StateDto | null = null;
-  runId = '';
 
-  vm$!: Observable<{ mc: number; s: StateDto | null }>;
-  vmView$!: Observable<{ mc: number; s: StateDto | null }>;
+export class EnglishViewComponent implements OnInit, OnDestroy {
+  // ---------- DI ----------
+  private route = inject(ActivatedRoute);
+  private fb = inject(FormBuilder);
+  private store = inject(RundownService);
+  public hub = inject(SignalrService);
 
+  // ---------- Route / connection ----------
+  private subRoute?: Subscription;
+  private subState?: Subscription;
+  runId!: string;
+  connected = false;
+  connectErr: unknown = null;
+
+  // ---------- Reactive state exposed to template ----------
+  state$ = this.hub.state$;
+  isLive$ = this.hub.isLive$;
+  lastSyncAgo$ = this.hub.lastSyncAgo$;
+  masterCountdown$ = this.hub.masterCountdown$;
+
+  state: ViewStateDto | null = null;
+
+  vm$!: Observable<{ mc: number; s: ViewStateDto | null }>;
+  vmView$!: Observable<{ mc: number; s: ViewStateDto | null }>;
+
+  // ---------- Forms ----------
+  etaForm = this.fb.group({
+    etaSec: this.fb.control<number | null>(null),
+  });
+
+  // ---------- UI / view helpers ----------
   offeringClicked = false;
+  trackBySeg: TrackByFunction<ViewStateDto['english']['segments'][number]> = (_i, s) => s.id;
+  get doc$() { return this.store.doc$; }
+  // ----- SHIMS for current template -----
 
-  // track most-recently completed English segment (for row highlight)
+  // Used by multiple *ngFor (segments, etaToasts, sermonEndToasts, doc.segments)
+  public trackById: TrackByFunction<any> = (_: number, row: any) => row?.id ?? _;
+
+  // Template calls (click)="complete(seg.id)"
+  public complete(id: string) {
+    if (this.runId) this.hub.completeSegment(this.runId, id);
+  }
+
+
+  // ---------- Toasts ----------
+  etaToasts: EtaToast[] = [];
+  sermonEndToasts: { id: number; wall: Date | null }[] = [];
+  private lastEtaAbsSec: number | null = null;
+  private lastToastAt = 0;
+  private lastSermonEndSec: number | null = null;
+  private toastIdSeq = 1;
+
+  @ViewChild('etaChime') etaChime?: ElementRef<HTMLAudioElement>;
+
+  // ---------- Row highlight ----------
   private prevCompletedIds = new Set<string>();
   lastCompletedId: string | null = null;
 
-
-  connected = false;
-  connectErr: any = null;
-
-  // live rundown from the editor (safe: no “used before init”)
-  get doc$() { return this.store.doc$; }
-
-  // one reusable trackBy for everything
-  trackById: TrackByFunction<any> = (_: number, x) => x.id;
-
-
-
-
-  constructor(public hub: SignalrService, private route: ActivatedRoute, private store: RundownService) {
-
-  }
-
-
-
-
-  // ---- OFFERING / PREDICTED HELPERS ----
-
-  // find "Offering" row (case-insensitive)
-  private offeringIndex(s: StateDto): number {
-    return s.english.segments.findIndex(x => /offering/i.test(x.name));
-  }
-
-  // Planned time when Offering should start (sum planned prior to “Offering”)
-  private plannedOfferingStartSec(s: StateDto): number | null {
-    const idx = s.english.segments.findIndex(x => /offering/i.test(x.name));
-    if (idx < 0) return null;
-    let total = 0;
-    for (let i = 0; i < idx; i++) total += (s.english.segments[i].plannedSec ?? 0);
-    return total;
-  }
-
-  // Live projected start (planned + running drift from completed)
-  private projectedOfferingStartSec(s: StateDto): number | null {
-    const planned = this.plannedOfferingStartSec(s);
-    if (planned == null) return null;
-    const drift = +(s.english.runningDriftBeforeOfferingSec ?? 0);
-    return planned + drift;
-  }
-
-  // Prefer: real stamp > 0; else ETA > 0; else fallback target (36:00)
-  private spanishAnchorOrPlannedSec(s: StateDto): number {
-    const ended = s.spanish?.sermonEndedAtSec;
-    const eta = (s as any)?.spanish?.sermonEndEtaSec; // TS-safe during Phase 1
-    if (typeof ended === 'number' && ended > 0) return ended;
-    if (typeof eta === 'number' && eta > 0) return eta;
-    return this.hub.masterTargetSec; // 36:00 fallback
-  }
-
-  // Final only when REAL stamp exists (>0)
-  isFinalOfferingAvailable(s: StateDto): boolean {
-    return !!s.masterStartAtUtc
-      && typeof s.spanish?.sermonEndedAtSec === 'number'
-      && s.spanish!.sermonEndedAtSec > 0;
-  }
-
-  // Predicted (drift-aware; uses fallback/ETA/stamp anchor)
-  predictedOfferingLengthSec(s: StateDto): number | null {
-    const start = this.projectedOfferingStartSec(s);
-    if (start == null) return null;
-    const base = +(s.baseOfferingSec ?? 0);
-    const anchor = this.spanishAnchorOrPlannedSec(s);
-    const gap = Math.max(0, anchor - start);
-    return Math.max(base, gap);
-  }
-
-
-  // Predicted full length (never null: falls back to base)
-  predictedLengthSec(s: StateDto): number {
-    const base = +(s.baseOfferingSec ?? 0);
-    const start = this.projectedOfferingStartSec(s);
-    if (start == null) return base;
-    const gap = Math.max(0, this.anchorSec(s) - start);
-    return Math.max(base, gap);
-  }
-
-  // Predicted extension only (>= 0)
-  predictedExtensionSec(s: StateDto): number {
-    const ext = this.predictedLengthSec(s) - +(s.baseOfferingSec ?? 0);
-    return Math.max(0, ext);
-  }
-
-  // ---- END OFFERING HELPERS ----
-
-
-
-  async ngOnInit() {
-    // --- Connect to SignalR run by :id from /runs/:id/english ---
-    this.runId = this.route.snapshot.paramMap.get('id') ?? '';
-    if (!this.runId) {
-      console.warn('Producer: no runId in route → live UI will be hidden; editor fallback can still show.');
-    } else {
-      try {
-        await this.hub.connect(this.runId);
-        this.connected = true;
-      } catch (e) {
-        this.connectErr = e;
-        console.error('Producer: SignalR connect failed', e);
-      }
-    }
-
-    this.state = this.hub.state$.value;
-
-    // View model streams (single assignment)
-    this.vm$ = combineLatest([
-      this.hub.masterCountdown$.pipe(startWith(null as number | null)),
-      this.hub.state$.pipe(startWith(this.state))
-    ]).pipe(map(([mc, s]) => ({ mc: mc ?? 0, s })));
-
-    this.vmView$ = this.vm$.pipe(auditTime(0)); // stabilize change detection
-
-    // Keep local state + toast logic in sync
-    this.hub.state$.subscribe(s => {
-      this.state = s;
-      this.updateHighlight(s);
-
-      const eta = (s as any)?.spanish?.sermonEndEtaSec;
-      if (typeof eta === 'number') this.onEtaUpdated(eta);
-
-      const end = s?.spanish?.sermonEndedAtSec ?? null;
-      if (typeof end === 'number' && end > 0 && end !== this.lastSermonEndSec) {
-        this.lastSermonEndSec = end;
-        this.pushSermonEndedToast();
-      }
-    });
-  }
-
-
-  startRun() { this.hub.startRun(this.runId); }
-
-  startOffering() {
-    if (this.offeringClicked) return;
-    this.offeringClicked = true;
-    this.hub.startOffering(this.runId);
-  }
-
-  isOfferingLocked(s: StateDto): boolean {
-    const seg = s.english.segments.find(x => /offering/i.test(x.name));
-    if (!seg) return false;
-    return !!seg.completed || (seg.actualSec ?? 0) > 0;
-  }
-
-  complete(id: string) { this.hub.completeSegment(this.runId, id); }
-
-
-  // Live ET clock
+  // ---------- Clocks ----------
+  nowSec$ = timer(0, 1000).pipe(map(() => Math.floor(Date.now() / 1000)));
   etNow$ = interval(1000).pipe(
     startWith(0),
     map(() =>
@@ -289,7 +160,6 @@ export class EnglishViewComponent implements OnInit {
       }).format(new Date())
     )
   );
-
   etDate$ = interval(1000).pipe(
     startWith(0),
     map(() =>
@@ -303,14 +173,107 @@ export class EnglishViewComponent implements OnInit {
     )
   );
 
-  // Row active logic for the live timer
-  isActive(idx: number, segs: StateDto['english']['segments']): boolean {
+  // =========================================================
+  // Lifecycle
+  // =========================================================
+  async ngOnInit() {
+    // pick up :runId or :id (supports both route shapes)
+    this.subRoute = this.route.paramMap.subscribe(async (pm) => {
+      let id = pm.get('runId') ?? pm.get('id') ?? '';
+
+      if (id && id !== 'latest') {
+        if (this.connected && id === this.runId) return;
+        this.runId = id;
+        try { await this.hub.connect(this.runId); this.connected = true; }
+        catch (e) { this.connectErr = e; console.error('[EnglishView] connect failed', e); }
+        return;
+      }
+
+      // Fallback to latest run when no id or "latest"
+      this.store.getLatestRunId().subscribe(async ({ runId }) => {
+        if (!runId) return;
+        if (this.connected && runId === this.runId) return;
+        this.runId = runId;
+        try { await this.hub.connect(runId); this.connected = true; }
+        catch (e) { this.connectErr = e; console.error('[EnglishView] connect failed', e); }
+      });
+    });
+
+
+    // reflect hub state locally + drive toasts/highlights
+    this.subState = this.hub.state$.subscribe((s) => {
+      this.state = s as ViewStateDto | null;
+      if (!s) return;
+
+      this.updateHighlight(s as ViewStateDto);
+
+      const eta = (s as ViewStateDto).spanish?.sermonEndEtaSec;
+      if (typeof eta === 'number') this.onEtaUpdated(eta);
+
+      const end = s.spanish?.sermonEndedAtSec ?? null;
+      if (typeof end === 'number' && end > 0 && end !== this.lastSermonEndSec) {
+        this.lastSermonEndSec = end;
+        this.pushSermonEndedToast();
+      }
+    });
+
+    // build a small view model for template convenience
+    this.vm$ = combineLatest([
+      this.hub.masterCountdown$.pipe(startWith(null as number | null)),
+      this.hub.state$.pipe(startWith(this.state)),
+    ]).pipe(map(([mc, s]) => ({ mc: mc ?? 0, s: s as ViewStateDto | null })));
+
+    this.vmView$ = this.vm$.pipe(auditTime(0));
+  }
+
+  ngOnDestroy() {
+    this.subRoute?.unsubscribe();
+    this.subState?.unsubscribe();
+    this.hub.disconnect();
+  }
+
+  // =========================================================
+  // Actions (UI handlers)
+  // =========================================================
+  startRun() { if (this.runId) this.hub.startRun(this.runId); }
+  sermonEnded() { if (this.runId) this.hub.sermonEnded(this.runId); }
+  startOffering() {
+    if (!this.runId || this.offeringClicked) return;
+    this.offeringClicked = true;
+    this.hub.startOffering(this.runId);
+  }
+  completeSegment(segId: string) { if (this.runId) this.hub.completeSegment(this.runId, segId); }
+
+  setEta(delta?: number) {
+    const cur = this.etaForm.value.etaSec ?? 0;
+    const val = typeof delta === 'number' ? Math.max(0, cur + delta) : cur;
+    this.etaForm.patchValue({ etaSec: val });
+  }
+  submitEta() {
+    const v = this.etaForm.value.etaSec ?? 0;
+    if (this.runId) this.hub.setSpanishEta(this.runId, v);
+  }
+  clearEta() {
+    if (this.runId) this.hub.setSpanishEta(this.runId, 0);
+    this.etaForm.reset();
+  }
+
+  // =========================================================
+  // View helpers (segments / timing)
+  // =========================================================
+  isOfferingLocked(s: ViewStateDto): boolean {
+    const seg = s.english.segments.find(x => /offering/i.test(x.name));
+    if (!seg) return false;
+    return !!seg.completed || (seg.actualSec ?? 0) > 0;
+  }
+
+  isActive(idx: number, segs: ViewStateDto['english']['segments']): boolean {
     if (!this.state?.masterStartAtUtc) return false;
     for (let i = 0; i < idx; i++) if (!segs[i].completed) return false;
     return !segs[idx].completed;
   }
 
-  activeElapsedSec(idx: number, segs: StateDto['english']['segments']): number {
+  activeElapsedSec(idx: number, segs: ViewStateDto['english']['segments']): number {
     let sumActualBefore = 0;
     for (let i = 0; i < idx; i++) sumActualBefore += (segs[i].actualSec ?? 0);
     const masterStartMs = Date.parse(this.state!.masterStartAtUtc!);
@@ -319,8 +282,18 @@ export class EnglishViewComponent implements OnInit {
     return Math.max(0, Math.floor((nowMs - segStartMs) / 1000));
   }
 
-  // Highlight newest completed item
-  private updateHighlight(s: StateDto | null) {
+  endedAt(idx: number, segs: ViewStateDto['english']['segments']): Date | null {
+    if (!this.state?.masterStartAtUtc || !segs[idx]?.completed) return null;
+    let total = 0;
+    for (let i = 0; i <= idx; i++) total += (segs[i].actualSec ?? 0);
+    const endMs = Date.parse(this.state.masterStartAtUtc) + total * 1000;
+    return new Date(endMs);
+  }
+
+  // =========================================================
+  // Drift / ETA helpers
+  // =========================================================
+  private updateHighlight(s: ViewStateDto | null) {
     if (!s) return;
     const completed = s.english.segments.filter(x => x.completed);
     const completedIds = new Set(completed.map(x => x.id));
@@ -334,89 +307,6 @@ export class EnglishViewComponent implements OnInit {
     this.prevCompletedIds = completedIds;
   }
 
-  endedAt(idx: number, segs: StateDto['english']['segments']): Date | null {
-    if (!this.state?.masterStartAtUtc || !segs[idx]?.completed) return null;
-    let total = 0;
-    for (let i = 0; i <= idx; i++) total += (segs[i].actualSec ?? 0);
-    const endMs = Date.parse(this.state.masterStartAtUtc) + total * 1000;
-    return new Date(endMs);
-  }
-
-  // Which anchor to use: Final > ETA > 36:00 fallback
-  private anchorSec(s: StateDto): number {
-    const ended = s.spanish?.sermonEndedAtSec ?? 0;
-    const eta = (s as any)?.spanish?.sermonEndEtaSec ?? 0;
-    if (ended > 0) return ended;
-    if (eta > 0) return eta;
-    return this.hub.masterTargetSec; // 36:00
-  }
-
-
-  // Store the remaining time snapshot (what the Spanish side entered) + timestamp
-  etaToasts: EtaToast[] = [];
-  private lastEtaAbsSec: number | null = null;
-  private toastIdSeq = 1;
-  private lastToastAt = 0;
-  sermonEndToasts: { id: number; wall: Date | null }[] = [];
-  private lastSermonEndSec: number | null = null;
-
-  @ViewChild('etaChime') etaChime?: ElementRef<HTMLAudioElement>;
-
-  private async onEtaUpdated(newEtaAbsSec: number) {
-    // ignore zeros/nulls and true duplicates
-    if (!(newEtaAbsSec > 0)) return;
-    if (this.lastEtaAbsSec != null && newEtaAbsSec === this.lastEtaAbsSec) return;
-
-    // rate-limit: ignore if within 800ms of last toast
-    // (helps if multiple updates arrive in quick succession)
-    // throttle
-    const now = Date.now();
-    if (now - this.lastToastAt < 800) return;
-    this.lastToastAt = now;
-
-    this.lastEtaAbsSec = newEtaAbsSec;
-
-    // compute the countdown snapshot to display (entered ETA relative to "now")
-    const nowElapsed = this.masterElapsedSec() ?? 0;                 // seconds since master start
-    const remSec = Math.max(0, Math.floor(newEtaAbsSec - nowElapsed)); // show 5:00 if they entered 5:00
-
-    // stripe logic vs 36:00 target
-    const deltaFromTarget = newEtaAbsSec - this.hub.masterTargetSec;
-
-    const id = this.toastIdSeq++;
-    const wall = new Date(this.hub.serverNowMs());
-    this.etaToasts = [...this.etaToasts, { id, remSec, wall, deltaFromTarget }];
-
-    try { await this.etaChime?.nativeElement.play(); } catch { }
-  }
-
-  private pushSermonEndedToast() {
-    const id = this.toastIdSeq++;
-    const wall = this.spanishEndedAtWallTime();
-    this.sermonEndToasts.push({ id, wall: wall ?? null });
-  }
-
-
-  spanishEtaSec(s: any): number | null {
-    const manual = s?.spanish?.sermonEndEtaSec;
-    if (manual != null) return manual;   // manual override wins
-    // fallback: if you still have a computed ETA, return it; otherwise null
-    return null; // or: return this.computeSpanishEtaFromTimestamps(s);
-  }
-
-
-  // Color ETA red if later than 36:00, green if earlier; neutral if exactly 36:00
-  etaColor(etaSec: number): string {
-    if (etaSec > this.hub.masterTargetSec) return '#dc2626';  // red
-    if (etaSec < this.hub.masterTargetSec) return '#16a34a';  // green
-    return 'inherit';
-  }
-
-  // Difference vs the 36:00 target (positive = late, negative = early)
-  etaDeltaFromTarget(etaSec: number): number {
-    return etaSec - this.hub.masterTargetSec;
-  }
-
   private masterElapsedSec(): number | null {
     const start = this.state?.masterStartAtUtc;
     if (!start) return null;
@@ -424,25 +314,76 @@ export class EnglishViewComponent implements OnInit {
     return Math.max(0, Math.floor(ms / 1000));
   }
 
-  spanishTimeLeftSec(): number | null {
-    const ended = this.state?.spanish?.sermonEndedAtSec;
-    if (ended != null && ended > 0) return 0;                  // ← freeze at 0 after final
-    const etaAbs = this.state?.spanish?.sermonEndEtaSec;
-    const now = this.masterElapsedSec();
-    if (etaAbs == null || now == null) return null;
-    return Math.max(0, etaAbs - now);
+  private spanishAnchorOrPlannedSec(s: ViewStateDto): number {
+    const ended = s.spanish?.sermonEndedAtSec;
+    const eta = s.spanish?.sermonEndEtaSec;
+    if (typeof ended === 'number' && ended > 0) return ended;
+    if (typeof eta === 'number' && eta > 0) return eta;
+    return this.hub.masterTargetSec; // 36:00 fallback
   }
 
-  spanishEndedAtWallTime(): Date | null {
-    const endSec = this.state?.spanish?.sermonEndedAtSec;
-    const startStr = this.state?.masterStartAtUtc;
+  predictedOfferingLengthSec(s: ViewStateDto): number | null {
+    const plannedStart = this.plannedOfferingStartSec(s);
+    if (plannedStart == null) return null;
+    const drift = +(s.english.runningDriftBeforeOfferingSec ?? 0);
+    const start = plannedStart + drift;
+    const base = +(s.baseOfferingSec ?? 0);
+    const anchor = this.spanishAnchorOrPlannedSec(s);
+    const gap = Math.max(0, anchor - start);
+    return Math.max(base, gap);
+  }
 
-    // Strict guards so TS knows both are valid
-    if (typeof endSec !== 'number' || endSec <= 0) return null;
-    if (!startStr) return null;
+  predictedLengthSec(s: ViewStateDto): number {
+    const base = +(s.baseOfferingSec ?? 0);
+    const plannedStart = this.plannedOfferingStartSec(s);
+    if (plannedStart == null) return base;
+    const drift = +(s.english.runningDriftBeforeOfferingSec ?? 0);
+    const start = plannedStart + drift;
+    const gap = Math.max(0, this.spanishAnchorOrPlannedSec(s) - start);
+    return Math.max(base, gap);
+  }
 
-    const startMs = Date.parse(startStr);
-    return new Date(startMs + endSec * 1000);
+  predictedExtensionSec(s: ViewStateDto): number {
+    const ext = this.predictedLengthSec(s) - +(s.baseOfferingSec ?? 0);
+    return Math.max(0, ext);
+  }
+
+  private plannedOfferingStartSec(s: ViewStateDto): number | null {
+    const idx = s.english.segments.findIndex(x => /offering/i.test(x.name));
+    if (idx < 0) return null;
+    let total = 0;
+    for (let i = 0; i < idx; i++) total += (s.english.segments[i].plannedSec ?? 0);
+    return total;
+  }
+
+  // =========================================================
+  // Toasts
+  // =========================================================
+  private async onEtaUpdated(newEtaAbsSec: number) {
+    if (!(newEtaAbsSec > 0)) return;
+    if (this.lastEtaAbsSec != null && newEtaAbsSec === this.lastEtaAbsSec) return;
+
+    const now = Date.now();
+    if (now - this.lastToastAt < 800) return; // rate-limit duplicate bursts
+    this.lastToastAt = now;
+
+    this.lastEtaAbsSec = newEtaAbsSec;
+
+    const nowElapsed = this.masterElapsedSec() ?? 0;
+    const remSec = Math.max(0, Math.floor(newEtaAbsSec - nowElapsed));
+    const deltaFromTarget = newEtaAbsSec - this.hub.masterTargetSec;
+
+    const id = this.toastIdSeq++;
+    const wall = new Date(this.hub.serverNowMs());
+    this.etaToasts = [...this.etaToasts, { id, remSec, wall, deltaFromTarget }];
+
+    try { await this.etaChime?.nativeElement.play(); } catch { /* no-op */ }
+  }
+
+  private pushSermonEndedToast() {
+    const id = this.toastIdSeq++;
+    const wall = this.spanishEndedAtWallTime();
+    this.sermonEndToasts = [...this.sermonEndToasts, { id, wall: wall ?? null }];
   }
 
   closeEtaToast(id: number) {
@@ -453,6 +394,36 @@ export class EnglishViewComponent implements OnInit {
     this.sermonEndToasts = this.sermonEndToasts.filter(t => t.id !== id);
   }
 
+  spanishEtaSec(s: ViewStateDto | null): number | null {
+    const manual = s?.spanish?.sermonEndEtaSec;
+    return manual ?? null;
+  }
 
+  etaColor(etaSec: number): string {
+    if (etaSec > this.hub.masterTargetSec) return '#dc2626';  // red = late
+    if (etaSec < this.hub.masterTargetSec) return '#16a34a';  // green = early
+    return 'inherit';
+  }
+
+  etaDeltaFromTarget(etaSec: number): number {
+    return etaSec - this.hub.masterTargetSec;
+  }
+
+  spanishTimeLeftSec(): number | null {
+    const ended = this.state?.spanish?.sermonEndedAtSec;
+    if (ended != null && ended > 0) return 0;
+    const etaAbs = this.state?.spanish?.sermonEndEtaSec;
+    const now = this.masterElapsedSec();
+    if (etaAbs == null || now == null) return null;
+    return Math.max(0, etaAbs - now);
+  }
+
+  spanishEndedAtWallTime(): Date | null {
+    const endSec = this.state?.spanish?.sermonEndedAtSec;
+    const startStr = this.state?.masterStartAtUtc;
+    if (typeof endSec !== 'number' || endSec <= 0) return null;
+    if (!startStr) return null;
+    const startMs = Date.parse(startStr);
+    return new Date(startMs + endSec * 1000);
+  }
 }
-

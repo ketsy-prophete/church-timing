@@ -1,6 +1,8 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject } from 'rxjs';
 import { RundownDoc, RundownSegment } from '../models/rundown.models';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { environment } from '../../environments/environment';
+import { BehaviorSubject, firstValueFrom } from 'rxjs';
 
 const LS_KEY = 'rundown.v1';
 let _id = 1;
@@ -10,6 +12,67 @@ const newId = () => _id++;
 export class RundownService {
     private readonly _doc$ = new BehaviorSubject<RundownDoc>(this.load());
     readonly doc$ = this._doc$.asObservable();
+
+    private api = environment.apiBaseUrl;
+    private runId$ = new BehaviorSubject<string | null>(null);
+
+    constructor(private http: HttpClient) { }
+
+    private async ensureRunId(): Promise<string> {
+        const current = this.runId$.value;
+        if (current) return current;
+
+        try {
+            const latest = await firstValueFrom(
+                this.http.get<{ runId: string }>(`${this.api}/api/runs/latest`)
+            );
+            this.runId$.next(latest.runId);
+            return latest.runId;
+        } catch (e: any) {
+            if (e?.status === 404) {
+                const created = await firstValueFrom(
+                    this.http.post<{ runId: string }>(`${this.api}/api/runs`, {})
+                );
+                this.runId$.next(created.runId);
+                return created.runId;
+            }
+            throw e;
+        }
+    }
+
+    // Call this from your "Save to Producer"
+    // Call this from "Save to Producer"
+    async pushToBackend(): Promise<void> {
+        const runId = await this.ensureRunId();
+
+        // Map local editor rows → backend DTO
+        const items = this.segments.map((s, i) => ({
+            name: s.title ?? '',
+            plannedSec: (s.durationSec | 0),
+            order: i
+        }));
+
+        await firstValueFrom(
+            this.http.post<void>(`${this.api}/api/runs/${runId}/segments`, items)
+        );
+    }
+
+
+    // Safe state fetch with 404 auto-heal (refresh runId once)
+    async getState<T>(): Promise<T> {
+        let runId = await this.ensureRunId();
+        try {
+            return await firstValueFrom(this.http.get<T>(`${this.api}/api/runs/${runId}/state`));
+        } catch (e: any) {
+            if (e?.status === 404) {
+                this.runId$.next(null);
+                runId = await this.ensureRunId();
+                return await firstValueFrom(this.http.get<T>(`${this.api}/api/runs/${runId}/state`));
+            }
+            throw e;
+        }
+    }
+
 
     // --- getters ---
     get value() { return this._doc$.value; }
@@ -91,6 +154,54 @@ export class RundownService {
     clearAll() {
         this.commit({ serviceStartSec: 0, segments: [this.blank()] });
     }
+
+    // backend calls 
+    getLatestRunId() {
+        return this.http.get<{ runId: string }>(`${this.api}/api/runs/latest`);
+    }
+
+    getStateForRun(runId: string) {
+        return this.http.get<any>(`${this.api}/api/runs/${runId}/state`);
+    }
+
+    startRun(runId: string) {
+        return this.http.post<void>(`${this.api}/api/runs/${runId}/start`, {});
+    }
+
+    appendSegments(runId: string, items: Array<{ Name: string; PlannedSec: number }>) {
+        return this.http.post<{ added: number; total: number }>(
+            `${this.api}/api/runs/${runId}/segments`,
+            items
+        );
+    }
+
+    completeSegment(runId: string, segmentId: string) {
+        return this.http.post<void>(`${this.api}/api/runs/${runId}/segments/${segmentId}/complete`, {});
+    }
+
+    setSpanishEta(runId: string, etaSec: number) {
+        return this.http.post<void>(
+            `${this.api}/api/runs/${runId}/spanish/eta`,
+            etaSec,
+            { headers: new HttpHeaders({ 'Content-Type': 'application/json' }) }
+        );
+    }
+
+    spanishEnded(runId: string, endedAtSec?: number | null) {
+        const body = endedAtSec ?? null; // null = “now”
+        return this.http.post<void>(
+            `${this.api}/api/runs/${runId}/spanish/ended`,
+            body,
+            { headers: new HttpHeaders({ 'Content-Type': 'application/json' }) }
+        );
+    }
+
+    startOffering(runId: string) {
+        return this.http.post<void>(`${this.api}/api/runs/${runId}/offering/start`, {});
+    }
+
+
+
 
     // --- utils / derived ---
     totalSec(): number {

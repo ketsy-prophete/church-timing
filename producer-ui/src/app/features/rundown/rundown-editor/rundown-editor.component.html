@@ -1,6 +1,5 @@
-
 <div class="rundown">
-  
+
   <header class="hdr">
     <div>
       <b>Service Rundown</b>
@@ -15,6 +14,9 @@
       <button type="button" (click)="reflowStarts()">Auto-fill starts</button>
       <button type="button" (click)="addSegment()">Add segment</button>
       <button type="button" (click)="clearAll()">Clear</button>
+
+      <button type="button" (click)="pushToBackend()">Save to Producer</button>
+
 
       <!-- Hidden in v1 -->
       <button *ngIf="!compact" type="button" (click)="copyJson()">Copy JSON</button>

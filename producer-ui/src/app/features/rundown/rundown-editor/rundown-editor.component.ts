@@ -2,8 +2,8 @@
 import { Component, OnDestroy, OnInit, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormArray, FormBuilder, FormControl, FormGroup, Validators } from '@angular/forms';
-import { TimePipe } from '../../../shared/time.pipe';            // name: 'mmss'
-import { SignedTimePipe } from '../../../shared/signed-time.pipe'; // name: 'signedmmss'
+import { TimePipe } from '../../../shared/time.pipe';
+import { SignedTimePipe } from '../../../shared/signed-time.pipe';
 import { debounceTime } from 'rxjs/operators';
 import { RundownSegment } from '../../../models/rundown.models';
 import { RundownService } from '../../../store/rundown.service';
@@ -35,7 +35,8 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
   overlapWarnings: string[] = [];
   private nextId = 1;
 
-  constructor(private fb: FormBuilder, private store: RundownService, private destroyRef: DestroyRef) {
+  constructor(private fb: FormBuilder, private store: RundownService, private destroyRef: DestroyRef, private rundown: RundownService
+  ) {
     this.form = this.fb.group({
       serviceStart: this.fb.control<number>(0, { nonNullable: true }),
       segments: this.fb.array<FormGroup<RundownRow>>([])
@@ -222,6 +223,38 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
 
       currentIds.splice(from, 1);
       currentIds.splice(i, 0, targetId);
+    }
+  }
+
+  pushToBackend() {
+    const items = this.segmentsArray.controls.map(fg => ({
+      Name: (fg.value.title ?? '').toString().trim() || 'Untitled',
+      PlannedSec: Number(fg.value.durationSec ?? 0) | 0
+    }));
+
+    const go = (runId: string) => {
+      this.rundown.startRun(runId).subscribe({
+        next: () => {
+          this.rundown.appendSegments(runId, items).subscribe({
+            next: res => {
+              console.log('Rundown appended', res);
+              // TODO: show toast “Rundown sent to Producer”
+            },
+            error: err => console.error('Append failed', err)
+          });
+        },
+        error: err => console.error('Start failed', err)
+      });
+    };
+
+    const existing = this.rundown.runId;
+    if (existing) {
+      go(existing);
+    } else {
+      this.rundown.getLatestRunId().subscribe({
+        next: ({ runId }) => { this.rundown.setRunId(runId); go(runId); },
+        error: err => console.error('Could not get latest run id', err)
+      });
     }
   }
 
