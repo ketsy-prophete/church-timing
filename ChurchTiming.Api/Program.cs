@@ -1,241 +1,185 @@
-using System.Collections.Concurrent;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
+using ChurchTiming.Api.Contracts;
+using ChurchTiming.Api.Data;
+
+
+
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddSignalR();
-builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
-    p.WithOrigins("http://localhost:4200")
-     .AllowAnyHeader()
-     .AllowAnyMethod()
-     .AllowCredentials()));
 
-builder.Services.AddSingleton<RunRepository>();
+// 1) Services
+builder.Services.AddDbContext<AppDbContext>(opt =>
+    opt.UseSqlite(builder.Configuration.GetConnectionString("Default")));
+
+builder.Services.AddSignalR();
+
+// CORS must be registered BEFORE Build()
+builder.Services.AddCors(o => o.AddPolicy("ui", p =>
+{
+    p.SetIsOriginAllowed(origin =>
+        origin.Equals("http://localhost:4200", StringComparison.OrdinalIgnoreCase) ||
+        origin.Equals("https://common-tagged-causing-instructions.trycloudflare.com", StringComparison.OrdinalIgnoreCase)
+    )
+    .AllowAnyHeader()
+    .AllowAnyMethod()
+    .AllowCredentials();
+}));
+
 
 var app = builder.Build();
-app.UseCors();
-app.MapHub<ServiceSyncHub>("/hubs/serviceSync");
+// 2) Middleware
+app.UseCors("ui");
+// 3) Hub
+app.MapHub<ServiceSyncHub>("/hubs/serviceSync").RequireCors("ui");
 
-// Create a run with preteach/walk/baseOffering and planned segments
-app.MapPost("/api/runs", (RunCreateDto dto, RunRepository repo) =>
+
+// ---- Endpoints (EF-only) ----
+
+// CREATE a run
+app.MapPost("/api/runs", async (RunCreateDto dto, AppDbContext db) =>
 {
-    var run = new RunState
+    var run = new Run
     {
-        Id = Guid.NewGuid(),
-        Date = DateOnly.FromDateTime(DateTime.UtcNow),
-        PreteachSec = dto.PreteachSec,
-        WalkBufferSec = dto.WalkBufferSec,
-        BaseOfferingSec = dto.BaseOfferingSec <= 0 ? 300 : dto.BaseOfferingSec,
-        Status = RunStatus.Draft,
-        Segments = dto.Segments?.Select((s, i) => new Segment
-        {
-            Id = Guid.NewGuid(),
-            Order = i + 1,
-            Name = s.Name,
-            PlannedSec = s.PlannedSec
-        }).ToList() ?? new()
+        PreteachSec = dto.preteachSec,
+        WalkBufferSec = dto.walkBufferSec,
+        BaseOfferingSec = dto.baseOfferingSec <= 0 ? 300 : dto.baseOfferingSec
     };
-    repo.Save(run);
+    db.Runs.Add(run);
+    await db.SaveChangesAsync();
     return Results.Ok(new { runId = run.Id });
 });
 
-// Get current state
-app.MapGet("/api/runs/{id:guid}/state", (Guid id, RunRepository repo) =>
+// START a run
+app.MapPost("/api/runs/{id:guid}/start", async (Guid id, AppDbContext db) =>
 {
-    var run = repo.Get(id);
-    return run is null ? Results.NotFound() : Results.Ok(StateDto.From(run));
-});
-
-// Start/Close (optional convenience)
-app.MapPost("/api/runs/{id:guid}/start", (Guid id, RunRepository repo, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
-{
-    var run = repo.Get(id); if (run is null) return Results.NotFound();
-    if (run.MasterStartAtUtc is null) { run.MasterStartAtUtc = DateTime.UtcNow; run.Status = RunStatus.Live; }
-    hub.Clients.Group(ServiceSyncHub.GroupName(id)).StateUpdated(StateDto.From(run));
+    var run = await db.Runs.FindAsync(id);
+    if (run is null) return Results.NotFound();
+    run.MasterStartAtUtc ??= DateTime.UtcNow;
+    await db.SaveChangesAsync();
     return Results.Ok();
 });
 
-app.MapPost("/api/runs/{id:guid}/close", (Guid id, RunRepository repo) =>
+// STATE
+app.MapGet("/api/runs/{id:guid}/state", async (Guid id, AppDbContext db) =>
 {
-    var run = repo.Get(id); if (run is null) return Results.NotFound();
-    run.Status = RunStatus.Closed; return Results.Ok();
+    var run = await db.Runs.Include(r => r.Segments).FirstOrDefaultAsync(r => r.Id == id);
+    if (run is null) return Results.NotFound();
+
+    var state = new
+    {
+        runId = run.Id,
+        serverTimeUtc = DateTime.UtcNow,
+        masterStartAtUtc = run.MasterStartAtUtc,
+        preteachSec = run.PreteachSec,
+        walkBufferSec = run.WalkBufferSec,
+        baseOfferingSec = run.BaseOfferingSec,
+        spanish = new { sermonEndedAtSec = run.SpanishSermonEndedAtSec, sermonEndEtaSec = run.SpanishSermonEndEtaSec },
+        english = new
+        {
+            segments = run.Segments
+                .OrderBy(s => s.Order)
+                .Select(s => new { id = s.Id, order = s.Order, name = s.Name, plannedSec = s.PlannedSec, actualSec = s.ActualSec, driftSec = s.DriftSec, completed = s.Completed })
+                .ToArray(),
+            runningDriftBeforeOfferingSec = 0,
+            offeringStartedAtSec = (int?)null
+        },
+        offeringSuggestion = new { stretchSec = 0, offeringTargetSec = run.BaseOfferingSec }
+    };
+
+    return Results.Ok(state);
 });
+
+// GET rundown
+app.MapGet("/api/runs/{id:guid}/rundown", async (Guid id, AppDbContext db) =>
+{
+    var exists = await db.Runs.AnyAsync(r => r.Id == id);
+    if (!exists) return Results.NotFound();
+
+    var segments = await db.Segments
+        .Where(s => s.RunId == id)
+        .OrderBy(s => s.Order)
+        .Select(s => new RundownSegmentDto(s.Id, s.Order, s.Name, s.PlannedSec, s.ActualSec, s.DriftSec, s.Completed))
+        .ToListAsync();
+
+    return Results.Ok(segments);
+});
+
+// SAVE rundown (replace all)
+app.MapPost("/api/runs/{id:guid}/rundown/save", async (Guid id, List<RundownSegmentSaveDto> items, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
+{
+    var run = await db.Runs.Include(r => r.Segments).FirstOrDefaultAsync(r => r.Id == id);
+    if (run is null) return Results.NotFound();
+
+    using var tx = await db.Database.BeginTransactionAsync();
+    db.Segments.RemoveRange(run.Segments);
+    await db.SaveChangesAsync();
+
+    var newSegs = items.Select((it, i) => new RundownSegment
+    {
+        RunId = id,
+        Order = it.order ?? i,
+        Name = it.name ?? "",
+        PlannedSec = it.plannedSec,
+        ActualSec = it.actualSec,
+        DriftSec = it.driftSec,
+        Completed = it.completed ?? false
+    });
+    await db.Segments.AddRangeAsync(newSegs);
+    await db.SaveChangesAsync();
+    await tx.CommitAsync();
+
+    await hub.Clients.All.RundownUpdated(id);
+    return Results.Ok();
+});
+
+// Spanish ETA
+app.MapPost("/api/runs/{id:guid}/spanish/eta", async (Guid id, int etaSec, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
+{
+    var run = await db.Runs.FindAsync(id);
+    if (run is null) return Results.NotFound();
+    run.SpanishSermonEndEtaSec = etaSec;
+    await db.SaveChangesAsync();
+    await hub.Clients.All.SpanishEtaUpdated(id, etaSec);
+    return Results.Ok();
+});
+
+// Spanish Ended
+app.MapPost("/api/runs/{id:guid}/spanish/ended", async (Guid id, int? endedAtSec, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
+{
+    var run = await db.Runs.FindAsync(id);
+    if (run is null || run.MasterStartAtUtc is null) return Results.BadRequest("Run not live or not found");
+    var sec = endedAtSec ?? (int)Math.Round((DateTime.UtcNow - run.MasterStartAtUtc.Value).TotalSeconds);
+    run.SpanishSermonEndedAtSec ??= sec;
+    await db.SaveChangesAsync();
+    await hub.Clients.All.SpanishEnded(id, run.SpanishSermonEndedAtSec.Value);
+    return Results.Ok(new { sermonEndedAtSec = run.SpanishSermonEndedAtSec });
+});
+
+// Utility/health
+app.MapGet("/ping", () => Results.Ok(new { ok = true, time = DateTime.UtcNow }));
+app.MapGet("/", () => Results.Text("root ok"));
+app.MapGet("/health", () => Results.Text("ok"));
+
+// DB smoke test
+app.MapGet("/__db/ok", async (AppDbContext db) =>
+{
+    var count = await db.Runs.CountAsync();
+    return Results.Ok(new { ok = true, runs = count });
+});
+
+//Dev HUD
+
+app.MapGet("/__hud/{id:guid}", async (Guid id, AppDbContext db) =>
+{
+    var run = await db.Runs.Include(r => r.Segments).FirstOrDefaultAsync(r => r.Id == id);
+    if (run is null) return Results.NotFound("Run not found");
+    var segs = string.Join(", ", run.Segments.OrderBy(s => s.Order).Select(s => $"{s.Order}:{s.Name}({s.PlannedSec}s)"));
+    return Results.Text(
+        $"RUN {run.Id}\nStartUtc: {run.MasterStartAtUtc?.ToString("u") ?? "-"}\nOffering: {run.BaseOfferingSec}s\nSpanish(eta/end): {run.SpanishSermonEndEtaSec}/{run.SpanishSermonEndedAtSec}\nSegments: [{segs}]",
+        "text/plain");
+});
+
 
 app.Run();
 
-// ========= Models / Repo / Hub =========
-public enum RunStatus { Draft, Live, Closed }
-
-public class RunState
-{
-    public Guid Id { get; set; }
-    public DateOnly Date { get; set; }
-    public DateTime? MasterStartAtUtc { get; set; }
-    public int PreteachSec { get; set; }
-    public int WalkBufferSec { get; set; }
-    public int BaseOfferingSec { get; set; } = 300;
-    public RunStatus Status { get; set; } = RunStatus.Draft;
-
-    // Spanish
-    public int? SermonEndedAtSec { get; set; } // seconds since master start
-    public int? SermonEndEtaSec { get; set; }
-
-
-    // English
-    public List<Segment> Segments { get; set; } = new();
-    public int? OfferingStartedAtSec { get; set; }
-}
-
-public class Segment
-{
-    public Guid Id { get; set; }
-    public int Order { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public int PlannedSec { get; set; }
-    public DateTime? StartAtUtc { get; set; }
-    public DateTime? EndAtUtc { get; set; }
-    public int? ActualSec { get; set; }
-    public int? DriftSec { get; set; }
-}
-
-public record RunCreateDto(int PreteachSec, int WalkBufferSec, int BaseOfferingSec, List<SegmentPlanDto>? Segments);
-public record SegmentPlanDto(string Name, int PlannedSec);
-
-public class RunRepository
-{
-    private readonly ConcurrentDictionary<Guid, RunState> _runs = new();
-    public RunState? Get(Guid id) => _runs.TryGetValue(id, out var r) ? r : null;
-    public void Save(RunState run) => _runs[run.Id] = run;
-}
-
-public interface ISyncClient
-{
-    Task StateUpdated(StateDto state);
-    Task Error(string message);
-}
-
-public class ServiceSyncHub(RunRepository repo) : Hub<ISyncClient>
-{
-    public static string GroupName(Guid runId) => $"run:{runId}";
-
-    public async Task JoinRun(Guid runId)
-    {
-        await Groups.AddToGroupAsync(Context.ConnectionId, GroupName(runId));
-        var run = repo.Get(runId);
-        if (run is not null)
-            await Clients.Caller.StateUpdated(StateDto.From(run));
-    }
-
-    public async Task StartRun(Guid runId)
-    {
-        var run = repo.Get(runId); if (run is null) { await Clients.Caller.Error("Run not found"); return; }
-        if (run.MasterStartAtUtc is null) { run.MasterStartAtUtc = DateTime.UtcNow; run.Status = RunStatus.Live; }
-        await Clients.Group(GroupName(runId)).StateUpdated(StateDto.From(run));
-    }
-
-    public async Task SermonEnded(Guid runId)
-    {
-        var run = repo.Get(runId); if (run is null || run.MasterStartAtUtc is null) { await Clients.Caller.Error("Run not live"); return; }
-        if (run.SermonEndedAtSec is null)
-            run.SermonEndedAtSec = (int)Math.Round((DateTime.UtcNow - run.MasterStartAtUtc.Value).TotalSeconds);
-        await Clients.Group(GroupName(runId)).StateUpdated(StateDto.From(run));
-    }
-
-    public async Task StartOffering(Guid runId)
-    {
-        var run = repo.Get(runId); if (run is null || run.MasterStartAtUtc is null) { await Clients.Caller.Error("Run not live"); return; }
-        if (run.OfferingStartedAtSec is null)
-            run.OfferingStartedAtSec = (int)Math.Round((DateTime.UtcNow - run.MasterStartAtUtc.Value).TotalSeconds);
-        await Clients.Group(GroupName(runId)).StateUpdated(StateDto.From(run));
-    }
-
-    public async Task CompleteSegment(Guid runId, Guid segmentId)
-    {
-        var run = repo.Get(runId); if (run is null || run.MasterStartAtUtc is null) { await Clients.Caller.Error("Run not live"); return; }
-
-        var segs = run.Segments.OrderBy(s => s.Order).ToList();
-        var seg = segs.FirstOrDefault(s => s.Id == segmentId);
-        if (seg is null) { await Clients.Caller.Error("Segment not found"); return; }
-
-        if (seg.EndAtUtc is null)
-        {
-            var idx = segs.FindIndex(s => s.Id == segmentId);
-            var prevEnd = idx > 0 ? (segs[idx - 1].EndAtUtc ?? run.MasterStartAtUtc) : run.MasterStartAtUtc;
-
-            seg.StartAtUtc ??= prevEnd; // start = previous segment's end (or master start)
-            seg.EndAtUtc = DateTime.UtcNow;
-
-            seg.ActualSec = (int)Math.Round((seg.EndAtUtc.Value - seg.StartAtUtc.Value).TotalSeconds);
-            seg.DriftSec = seg.ActualSec - seg.PlannedSec;
-        }
-
-        await Clients.Group(GroupName(runId)).StateUpdated(StateDto.From(run));
-    }
-
-    public async Task SetSpanishEta(Guid runId, int etaSec)
-    {
-        var run = repo.Get(runId);
-        if (run is null || run.MasterStartAtUtc is null)
-        {
-            await Clients.Caller.Error("Run not live or not found");
-            return;
-        }
-
-        // 0 means "clear"
-        run.SermonEndEtaSec = etaSec > 0 ? etaSec : null;
-
-        await Clients.Group(GroupName(runId)).StateUpdated(StateDto.From(run));
-    }
-
-
-}
-
-public record StateDto(
-    Guid RunId,
-    DateTime ServerTimeUtc,
-    DateTime? MasterStartAtUtc,
-    int PreteachSec,
-    int WalkBufferSec,
-    int BaseOfferingSec,
-    SpanishDto Spanish,
-    EnglishDto English,
-    OfferingSuggestionDto OfferingSuggestion)
-{
-    public static StateDto From(RunState r)
-    {
-        var serverNow = DateTime.UtcNow;
-        var runningDrift = r.Segments
-            .Where(s => s.DriftSec is not null)
-            .Sum(s => s.DriftSec!.Value);
-
-        var stretch = ComputeStretch(r.SermonEndedAtSec, r.WalkBufferSec, r.OfferingStartedAtSec, r.BaseOfferingSec, r.PreteachSec);
-
-        return new StateDto(
-            r.Id,
-            serverNow,
-            r.MasterStartAtUtc,
-            r.PreteachSec,
-            r.WalkBufferSec,
-            r.BaseOfferingSec,
-            new SpanishDto(r.SermonEndedAtSec, r.SermonEndEtaSec),
-            new EnglishDto(
-                r.Segments.Select(s => new SegmentDto(s.Id, s.Order, s.Name, s.PlannedSec, s.ActualSec, s.DriftSec, s.EndAtUtc is not null)).ToList(),
-                runningDrift,
-                r.OfferingStartedAtSec
-            ),
-            new OfferingSuggestionDto(stretch, r.BaseOfferingSec + stretch)
-        );
-    }
-
-    static int ComputeStretch(int? sermonEnd, int walkBufferSec, int? offeringStart, int baseOfferingSec, int preteachSec)
-    {
-        if (sermonEnd is null || offeringStart is null) return 0;
-        var targetArrival = sermonEnd.Value + walkBufferSec;
-        var endOfOfferingPlusPreteach = offeringStart.Value + baseOfferingSec + preteachSec;
-        return Math.Max(0, targetArrival - endOfOfferingPlusPreteach);
-    }
-}
-
-public record SpanishDto(int? SermonEndedAtSec, int? SermonEndEtaSec);
-public record EnglishDto(List<SegmentDto> Segments, int RunningDriftBeforeOfferingSec, int? OfferingStartedAtSec);
-public record SegmentDto(Guid Id, int Order, string Name, int PlannedSec, int? ActualSec, int? DriftSec, bool Completed);
-public record OfferingSuggestionDto(int StretchSec, int OfferingTargetSec);
