@@ -151,7 +151,7 @@
 <section *ngIf="doc$ | async as doc">
   <div class="segments-head">
     <h3>Rundown</h3>
-    <span class="total-drift">Total: {{ (doc.segments || []).reduce((a,s)=>a+(s?.durationSec||0),0) | mmss }}</span>
+    <span class="total-drift">Total: {{ totalDurationSec(doc) | mmss }}</span>
   </div>
 
   <div class="segments-wrap">

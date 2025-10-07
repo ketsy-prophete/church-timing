@@ -1,4 +1,5 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, TrackByFunction } from '@angular/core';
+import { RundownSegment } from '../../models/rundown.models';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { SignalrService } from '../../core/services/signalr';
@@ -34,7 +35,13 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
   private subRoute?: Subscription;
   runId!: string;
   private subState?: Subscription;
-  trackById = (_: number, row: any) => row?.id ?? _;
+  
+  trackById: TrackByFunction<RundownSegment> = (_i, row) => row.id;
+  trackBySegWrap = (_: number, row: { seg: { id: string } }) => row.seg.id;
+
+  segmentsFrom(doc: { segments?: RundownSegment[] } | null | undefined): RundownSegment[] {
+    return (doc?.segments ?? []) as RundownSegment[];
+  }
 
   doc$ = this.rundown.doc$;
 
@@ -69,13 +76,13 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
     this.state = this.hub.state$.value;
 
     this.subRoute = this.route.paramMap.subscribe(async pm => {
-      const id = pm.get('runId')!;
+      const id = pm.get('runId') ?? pm.get('id');
       if (!id || id === this.runId) return;
       this.runId = id;
-      await this.hub.connect(id);   // live controls
-      this.rundown.init(id);        // rundown doc
-
+      await this.hub.connect(id);
+      this.rundown.init(id);
     });
+
 
     this.vm$ = combineLatest([
       this.hub.masterCountdown$.pipe(startWith(null as number | null)),
@@ -240,6 +247,8 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
     return new Date(startMs + endSec * 1000);
   }
 
-
+  totalDurationSec(doc: { segments?: Array<{ durationSec?: number }> } | null | undefined): number {
+    return (doc?.segments ?? []).reduce((sum, s) => sum + (s?.durationSec ?? 0), 0);
+  }
 
 }

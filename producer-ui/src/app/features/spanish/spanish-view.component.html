@@ -118,7 +118,7 @@
             <div class="segments-head">
                 <h3>Rundown</h3>
                 <span class="total-drift">
-                    Total: {{ (doc.segments || []).reduce((a,s)=>a+(s?.durationSec||0),0) | mmss }}
+                    Total: {{ totalDurationSec(doc) | mmss }}
                 </span>
             </div>
 
@@ -134,7 +134,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        <tr *ngFor="let s of (doc.segments || []); let i = index; trackBy: trackById">
+                        <tr *ngFor="let s of segmentsFrom(doc); let i = index; trackBy: trackById">
                             <td>{{ i + 1 }}</td>
                             <td>{{ s.title || 'Untitled' }}</td>
                             <td>{{ s.startSec | mmss }}</td>

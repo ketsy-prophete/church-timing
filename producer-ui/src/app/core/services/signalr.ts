@@ -45,6 +45,49 @@ export class SignalrService {
 
 
   async connect(runId: string) {
+    // Build the connection if missing or fully disconnected
+    if (!this.hub || this.hub.state === signalR.HubConnectionState.Disconnected) {
+      this.hub = new signalR.HubConnectionBuilder()
+        .withUrl(environment.hubUrl)
+        .withAutomaticReconnect()
+        .build();
+
+      this.hub.on('StateUpdated', (state: StateDto) => {
+        this.stopPolling();
+        this.lastSyncAt = Date.now();
+        this.serverOffsetMs = Date.now() - Date.parse(state.serverTimeUtc);
+        this.state$.next(state);
+      });
+
+      this.hub.on('Error', (msg: string) => console.error('[Hub Error]', msg));
+
+      // Fallbacks & recovery
+      this.hub.onreconnecting(() => this.startPolling(this.currentRunId ?? runId));
+      this.hub.onreconnected(async () => {
+        this.stopPolling();
+        await this.syncOnce(this.currentRunId ?? runId);
+      });
+      this.hub.onclose(() => this.startPolling(this.currentRunId ?? runId));
+    }
+
+    try {
+      await this.hub.start();                // <— will throw if hubUrl is wrong/not reachable
+      this.stopPolling();
+      await this.syncOnce(runId);            // initial state fetch via REST
+    } catch (err) {
+      console.error('[SignalR] start failed', err);
+      this.startPolling(runId);              // graceful fallback
+    }
+  }
+
+  // Simple one-shot REST fetch used above
+  private async syncOnce(runId: string) {
+    const url = `${environment.apiBaseUrl}/api/runs/${runId}/state`;
+    const state = await firstValueFrom(this.http.get<StateDto>(url));
+    this.lastSyncAt = Date.now();
+    this.serverOffsetMs = Date.now() - Date.parse(state.serverTimeUtc);
+    this.state$.next(state);
+    
     // If a start() is already in-flight, wait and just (re)join.
     if (this.starting) {
       await this.starting;
@@ -64,58 +107,21 @@ export class SignalrService {
     // if already connected/connecting, keep your existing guard logic...
     // (unchanged)
 
-    // Build a new connection if needed
-    if (!this.hub) {
-      this.hub = new signalR.HubConnectionBuilder()
-        .withUrl(environment.hubUrl)
-        .withAutomaticReconnect()
-        .build();
+    // Kick off polling immediately so UI hydrates before hub connects
+    this.startPolling(runId);
 
-      // When hub pushes, treat that as "authoritative" and stop polling
-      this.hub.on('StateUpdated', (state: StateDto) => {
-        this.stopPolling();
-        this.lastSyncAt = Date.now();
-        this.serverOffsetMs = Date.now() - Date.parse(state.serverTimeUtc);
-        this.state$.next(state);
-      });
+    // Start hub (with your existing start lock)
+    this.starting = (async () => {
+      await this.hub!.start();
+      this.connected = true;
+    })();
+    try { await this.starting; } finally { this.starting = undefined; }
 
-      this.hub.on('Error', (msg: string) => console.error('[Hub Error]', msg));
+    // Join the group + one-time snapshot
+    await this.joinRun(runId);
+    this.currentRunId = runId;
+    this.getState(runId).subscribe(s => this.state$.next(s));
 
-      // If hub goes away, fall back to polling
-      this.hub.onreconnecting(() => this.startPolling(this.currentRunId ?? runId));
-      // Build a new connection if needed
-      if (!this.hub) {
-        this.hub = new signalR.HubConnectionBuilder()
-          .withUrl(environment.hubUrl)
-          .withAutomaticReconnect()
-          .build();
-
-        this.hub.on('StateUpdated', (state: StateDto) => {
-          this.stopPolling();
-          this.lastSyncAt = Date.now();
-          this.serverOffsetMs = Date.now() - Date.parse(state.serverTimeUtc);
-          this.state$.next(state);
-        });
-
-        this.hub.on('Error', (msg: string) => console.error('[Hub Error]', msg));
-
-        // If hub goes away, fall back to polling
-        this.hub.onreconnecting(() => this.startPolling(this.currentRunId ?? runId));
-
-        // ⬇️ REPLACE your existing onreconnected line with this:
-        this.hub.onreconnected(async () => {
-          this.stopPolling();
-          if (this.currentRunId) {
-            await this.joinRun(this.currentRunId);                 // re-join the group
-            this.getState(this.currentRunId).subscribe(s => this.state$.next(s)); // optional one-time refresh
-          }
-        });
-
-        this.hub.onclose(() => this.startPolling(this.currentRunId ?? runId));
-      }
-
-      this.hub.onclose(() => this.startPolling(this.currentRunId ?? runId));
-    }
 
     // Kick off polling **now** so the UI hydrates even before hub connects
     this.startPolling(runId);
@@ -213,5 +219,4 @@ export class SignalrService {
   getState(runId: string) {
     return this.http.get<StateDto>(`${environment.apiBaseUrl}/api/runs/${runId}/state`);
   }
-
 }

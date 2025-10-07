@@ -1,5 +1,5 @@
 export const environment = {
   production: false,
-  apiBaseUrl: 'https://diverse-animated-subsidiary-tune.trycloudflare.com',
-  hubUrl: 'https://diverse-animated-subsidiary-tune.trycloudflare.com/hubs/serviceSync'
+  apiBaseUrl: 'https://governments-dramatically-finish-position.trycloudflare.com',
+  hubUrl: 'https://governments-dramatically-finish-position.trycloudflare.com/hubs/serviceSync'
 };

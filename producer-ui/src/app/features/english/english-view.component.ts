@@ -123,36 +123,34 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
   // =========================================================
   // Lifecycle
   // =========================================================
-  async ngOnInit() {
-    // pick up :runId or :id (supports both route shapes)
-    this.subRoute = this.route.paramMap.subscribe(async (pm) => {
-      let id = pm.get('runId') ?? pm.get('id') ?? '';
-
-      if (id && id !== 'latest') {
-        if (this.connected && id === this.runId) return;
-        this.runId = id;
-        try {
-          await this.hub.connect(this.runId);
-          this.connected = true;
-          this.rundown.init(this.runId);   // <— hook up rundown state to this run
-        }
-        catch (e) { this.connectErr = e; console.error('[EnglishView] connect failed', e); }
-        return;
+  ngOnInit(): void {
+    this.subRoute = this.route.paramMap.subscribe(async pm => {
+      const id = pm.get('runId') ?? pm.get('id');
+      if (!id || id === this.runId) return;
+      this.runId = id;
+      try {
+        await this.hub.connect(id);
+        this.rundown.init(id);
+      } catch (e) {
+        console.error('[EnglishView] connect failed', e);
+        // (optional) set a field like this.connectErr = e;
       }
 
-      // If you still want a "latest" fallback, add a getLatestRunId() helper to RundownService and re-enable.
-      // For now, require a concrete :runId in the route.
-      // ===============================================================
-      // Fallback to latest run when no id or "latest"
-      // ===============================================================
-      // this.store.getLatestRunId().subscribe(async ({ runId }) => {
-      //   if (!runId) return;
-      //   if (this.connected && runId === this.runId) return;
-      //   this.runId = runId;
-      //   try { await this.hub.connect(runId); this.connected = true; }
-      //   catch (e) { this.connectErr = e; console.error('[EnglishView] connect failed', e); }
-      // });
     });
+
+    // If you still want a "latest" fallback, add a getLatestRunId() helper to RundownService and re-enable.
+    // For now, require a concrete :runId in the route.
+    // ===============================================================
+    // Fallback to latest run when no id or "latest"
+    // ===============================================================
+    // this.store.getLatestRunId().subscribe(async ({ runId }) => {
+    //   if (!runId) return;
+    //   if (this.connected && runId === this.runId) return;
+    //   this.runId = runId;
+    //   try { await this.hub.connect(runId); this.connected = true; }
+    //   catch (e) { this.connectErr = e; console.error('[EnglishView] connect failed', e); }
+    // });
+
 
 
     // reflect hub state locally + drive toasts/highlights
@@ -382,4 +380,9 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
     const startMs = Date.parse(startStr);
     return new Date(startMs + endSec * 1000);
   }
+
+  totalDurationSec(doc: { segments?: Array<{ durationSec?: number }> } | null | undefined): number {
+    return (doc?.segments ?? []).reduce((sum, s) => sum + (s?.durationSec ?? 0), 0);
+  }
+
 }
