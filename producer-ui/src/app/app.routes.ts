@@ -4,8 +4,8 @@ import { EnglishViewComponent } from './features/english/english-view.component'
 import { SpanishViewComponent } from './features/spanish/spanish-view.component';
 
 export const routes: Routes = [
-  { path: 'runs/:id/english', component: EnglishViewComponent },
-  { path: 'runs/:id/spanish', component: SpanishViewComponent },
+  { path: 'runs/:runId/english', component: EnglishViewComponent },
+  { path: 'runs/:runId/spanish', component: SpanishViewComponent },
   
   { path: 'runs/:runId/editor', loadComponent: () => import('./features/rundown/rundown-editor/rundown-editor.component').then(m => m.RundownEditorComponent) },
 

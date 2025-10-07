@@ -1,12 +1,13 @@
-// src/app/features/spanish/spanish-view.ts
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { SignalrService } from '../../core/services/signalr';
 import { TimePipe } from '../../shared/time.pipe';
 import { SignedTimePipe } from '../../shared/signed-time.pipe';
-import { Observable, interval, map, startWith, combineLatest } from 'rxjs';
+import { Observable, Subscription, interval, map, startWith, combineLatest } from 'rxjs';
 import type { StateDto as BaseStateDto } from '../../core/services/signalr';
+import { RundownService } from '../../store/rundown.service';
+
 
 type StateDto = BaseStateDto & {
   spanish: BaseStateDto['spanish'] & {
@@ -23,9 +24,20 @@ type StateDto = BaseStateDto & {
   styleUrls: ['./spanish-view.component.css'],
 })
 
-export class SpanishViewComponent implements OnInit {
+export class SpanishViewComponent implements OnInit, OnDestroy {
   state: StateDto | null = null;
-  private runId!: string;
+  // private runId!: string;
+
+  private route = inject(ActivatedRoute);
+  private rundown = inject(RundownService);
+  public hub = inject(SignalrService);
+  private subRoute?: Subscription;
+  runId!: string;
+  private subState?: Subscription;
+  trackById = (_: number, row: any) => row?.id ?? _;
+
+  doc$ = this.rundown.doc$;
+
 
   vm$!: Observable<{ mc: number; s: StateDto | null }>;
 
@@ -50,15 +62,20 @@ export class SpanishViewComponent implements OnInit {
   }
 
 
-
-
-
-  constructor(public hub: SignalrService, private route: ActivatedRoute) { }
+  constructor() { }
 
   async ngOnInit() {
-    this.runId = this.route.snapshot.params['id'];
-    await this.hub.connect(this.runId);
+
     this.state = this.hub.state$.value;
+
+    this.subRoute = this.route.paramMap.subscribe(async pm => {
+      const id = pm.get('runId')!;
+      if (!id || id === this.runId) return;
+      this.runId = id;
+      await this.hub.connect(id);   // live controls
+      this.rundown.init(id);        // rundown doc
+
+    });
 
     this.vm$ = combineLatest([
       this.hub.masterCountdown$.pipe(startWith(null as number | null)),
@@ -67,10 +84,18 @@ export class SpanishViewComponent implements OnInit {
       map(([mc, s]) => ({ mc: mc ?? 0, s }))
     );
 
-    this.hub.state$.subscribe(s => {
-      this.state = s;
-      this.updateHighlight(s);
+    this.subState = this.hub.state$.subscribe(s => {
+      this.state = s as StateDto | null;
+      this.updateHighlight(this.state);
     });
+
+  }
+
+  ngOnDestroy() {
+    this.subRoute?.unsubscribe();
+    this.subState?.unsubscribe();
+    this.hub.disconnect();
+    this.rundown.dispose();
   }
 
   startRun() { this.hub.startRun(this.runId); }

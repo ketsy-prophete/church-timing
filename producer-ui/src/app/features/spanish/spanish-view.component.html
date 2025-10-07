@@ -41,7 +41,7 @@
                 <th>Ended</th>
             </tr>
 
-            <tr *ngFor="let row of completedEnglishWithRunning; let idx = index"
+            <tr *ngFor="let row of completedEnglishWithRunning; let idx = index; trackBy: trackBySegWrap"
                 [class.highlight]="row.seg.id === lastCompletedId">
                 <td>{{ row.seg.order }}</td>
                 <td>{{ row.seg.name }}</td>
@@ -113,6 +113,39 @@
 
 
         </div>
+
+        <section *ngIf="doc$ | async as doc">
+            <div class="segments-head">
+                <h3>Rundown</h3>
+                <span class="total-drift">
+                    Total: {{ (doc.segments || []).reduce((a,s)=>a+(s?.durationSec||0),0) | mmss }}
+                </span>
+            </div>
+
+            <div class="segments-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Title</th>
+                            <th>Start</th>
+                            <th>Dur</th>
+                            <th>End</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr *ngFor="let s of (doc.segments || []); let i = index; trackBy: trackById">
+                            <td>{{ i + 1 }}</td>
+                            <td>{{ s.title || 'Untitled' }}</td>
+                            <td>{{ s.startSec | mmss }}</td>
+                            <td>{{ s.durationSec | mmss }}</td>
+                            <td>{{ (s.startSec + s.durationSec) | mmss }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
 
 
 

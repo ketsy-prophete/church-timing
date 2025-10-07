@@ -71,6 +71,8 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
 
   // Used by multiple *ngFor (segments, etaToasts, sermonEndToasts, doc.segments)
   public trackById: TrackByFunction<any> = (_: number, row: any) => row?.id ?? _;
+  trackBySegWrap = (_: number, row: { seg: { id: string } }) => row.seg.id;
+
 
   // Template calls (click)="complete(seg.id)"
   public complete(id: string) {
