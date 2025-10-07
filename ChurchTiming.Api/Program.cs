@@ -12,26 +12,33 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDbContext<AppDbContext>(opt =>
     opt.UseSqlite(builder.Configuration.GetConnectionString("Default")));
 
-builder.Services.AddSignalR();
-
+// ---- CORS (DEV-ONLY: allow any origin + credentials) ----
 // CORS must be registered BEFORE Build()
-builder.Services.AddCors(o => o.AddPolicy("ui", p =>
+const string CorsPolicy = "ui";
+
+builder.Services.AddCors(o => o.AddPolicy(CorsPolicy, p =>
 {
-    p.SetIsOriginAllowed(origin =>
-        origin.Equals("http://localhost:4200", StringComparison.OrdinalIgnoreCase) ||
-        origin.Equals("https://common-tagged-causing-instructions.trycloudflare.com", StringComparison.OrdinalIgnoreCase)
-    )
+    p.SetIsOriginAllowed(_ => true)  // allow ANY origin (dev)
     .AllowAnyHeader()
     .AllowAnyMethod()
     .AllowCredentials();
 }));
 
+builder.Services.AddControllers();
+builder.Services.AddSignalR();
 
 var app = builder.Build();
+
+app.UseRouting();
+
 // 2) Middleware
-app.UseCors("ui");
+app.UseCors(CorsPolicy);
+
+// Controllers + Hub both require the same policy
+app.MapControllers().RequireCors(CorsPolicy);
+
 // 3) Hub
-app.MapHub<ServiceSyncHub>("/hubs/serviceSync").RequireCors("ui");
+app.MapHub<ServiceSyncHub>("/hubs/serviceSync").RequireCors(CorsPolicy);
 
 
 // ---- Endpoints (EF-only) ----
