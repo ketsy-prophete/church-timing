@@ -39,9 +39,31 @@
         <div>End</div>
         <div>Actions</div>
       </div>
+      
 
       <div class="row" *ngFor="let g of segmentsArray.controls; let i = index; trackBy: trackBySegment" [formGroup]="g"
         [style.--stripe]="g.value.color || '#5b9'">
+
+
+
+
+        <!-- Duration mm:ss -->
+        <div class="mmss">
+          <input type="number" [value]="minOf(g.controls.durationSec.value)" (input)="setDurMin(i, $event)" min="0" />
+          :
+          <input type="number" [value]="secOf(g.controls.durationSec.value)" (input)="setDurSec(i, $event)" min="0"
+            max="59" />
+        </div>
+
+        <!-- Start mm:ss -->
+        <div class="mmss">
+          <input type="number" [value]="minOf(g.controls.startSec.value)" (input)="setStartMin(i, $event)" min="0" />
+          :
+          <input type="number" [value]="secOf(g.controls.startSec.value)" (input)="setStartSec(i, $event)" min="0"
+            max="59" />
+        </div>
+
+
 
         <div class="idx">{{ i + 1 }}</div>
 

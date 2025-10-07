@@ -143,6 +143,41 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
   }
 
 
+  // =================== Converting helpers for Start/Dur from secs (original) min/sec inputs =================== //
+  // Read helpers
+  minOf(sec?: number | null) { sec = sec ?? 0; return Math.floor(sec / 60); }
+  secOf(sec?: number | null) { sec = sec ?? 0; return sec % 60; }
+
+  // Write helpers (Duration)
+  setDurMin(i: number, ev: Event) {
+    const g = this.segmentsArray.at(i)!;
+    const ss = this.secOf(g.controls.durationSec.value);
+    const mm = Math.max(0, Number((ev.target as HTMLInputElement).value) | 0);
+    g.controls.durationSec.setValue(mm * 60 + ss);
+  }
+  setDurSec(i: number, ev: Event) {
+    const g = this.segmentsArray.at(i)!;
+    const mm = this.minOf(g.controls.durationSec.value);
+    let ss = Math.max(0, Number((ev.target as HTMLInputElement).value) | 0);
+    if (ss > 59) ss = 59; // clamp
+    g.controls.durationSec.setValue(mm * 60 + ss);
+  }
+
+  // Write helpers (Start)
+  setStartMin(i: number, ev: Event) {
+    const g = this.segmentsArray.at(i)!;
+    const ss = this.secOf(g.controls.startSec.value);
+    const mm = Math.max(0, Number((ev.target as HTMLInputElement).value) | 0);
+    g.controls.startSec.setValue(mm * 60 + ss);
+  }
+  setStartSec(i: number, ev: Event) {
+    const g = this.segmentsArray.at(i)!;
+    const mm = this.minOf(g.controls.startSec.value);
+    let ss = Math.max(0, Number((ev.target as HTMLInputElement).value) | 0);
+    if (ss > 59) ss = 59; // clamp
+    g.controls.startSec.setValue(mm * 60 + ss);
+  }
+
 
   addSegment() {
     const newSeg: RundownSegment = {

@@ -1,4 +1,3 @@
-// src/app/features/english/english-view.component.ts
 import { Component, OnInit, OnDestroy, ViewChild, ElementRef, TrackByFunction, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -29,70 +28,15 @@ interface EtaToast {
   selector: 'app-english-view',
   imports: [CommonModule, RouterLink, ReactiveFormsModule, TimePipe, SignedTimePipe],
   templateUrl: './english-view.component.html',
-  styles: [`
-    /* ---- Layout basics ---- */
-    .bar { display:flex; gap:12px; align-items:center; margin:8px 0; }
-    table { border-collapse:collapse; }
-    th, td { padding:6px 8px; border:1px solid #ccc; }
-
-    /* ---- Titlebar / live dot / clocks ---- */
-    .titlebar { display:flex; align-items:center; gap:12px; }
-    .titlebar h2 { margin:0; }
-    .dot { width:8px; height:8px; border-radius:50%; background:#bbb; display:inline-block; margin-left:6px; }
-    .dot.live { background:#2ecc71; animation:pulse 1s infinite; }
-    .dot.ended { background:#e53935; animation:none; }
-
-    .clock {
-      margin-left:auto;
-      display:flex;
-      align-items:flex-end;
-      gap:12px;      /* separates the stack and the "last sync" label */
-      font-weight:400;
-    }
-    .clock .stack {
-      display:flex;
-      flex-direction:column;
-      align-items:flex-end;
-      line-height:1.15;
-    }
-    .clock-time { font-weight:700; font-size:20px; line-height:1; }
-    .clock-date { font-weight:500; font-size:12px; opacity:.8; line-height:1.2; }
-    .last-sync  { white-space:nowrap; opacity:.8; align-self:flex-end; }
-
-    @keyframes pulse { 0%{opacity:.4} 50%{opacity:1} 100%{opacity:.4} }
-
-    /* ---- Segments table / states ---- */
-    .segments-wrap { display:inline-block; }
-    .segments-wrap table { width:auto; }
-    .segments-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin:16px 0 8px; }
-    .segments-head h3 { margin:0; }
-    .total-drift { font-weight:600; white-space:nowrap; }
-
-    .time-red { color:#e53935; }
-    .over { color:#000000; }
-    .under { color:#dc2626; }
-    .actual-cell { min-width:96px; }
-    .actual-primary { font-weight:600; line-height:1.1; }
-
-    /* ---- Toasts ---- */
-    .toast-wrap { position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; z-index:1000; pointer-events:none; }
-    .toast { pointer-events:auto; position:relative; background:#111; color:#fff; border-radius:6px; padding:14px 36px 12px 12px; box-shadow:0 6px 24px rgba(0,0,0,.25); font-size:13px; border-left:4px solid transparent; }
-    .toast.small { padding:10px 12px; }
-    .toast small { opacity:.8; }
-    .toast.delta-early { border-left-color:#16a34a; }
-    .toast.delta-late  { border-left-color:#dc2626; }
-    .toast.alert { background:#dc2626; color:#fff; }
-    .toast-close { position:absolute; top:8px; right:10px; background:transparent; border:none; cursor:pointer; color:inherit; font-size:16px; line-height:1; }
-    .toast > div:first-child { display:block; padding-right:28px; }
-    .toast .stamp { opacity:.72; display:block; margin-top:4px; font-style:italic; }
-  `],
+  styleUrls: ['./english-view.component.css'],
 })
 
 export class EnglishViewComponent implements OnInit, OnDestroy {
+
   // ---------- DI ----------
   private route = inject(ActivatedRoute);
   private fb = inject(FormBuilder);
-  private store = inject(RundownService);
+  private rundown = inject(RundownService);
   public hub = inject(SignalrService);
 
   // ---------- Route / connection ----------
@@ -121,7 +65,8 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
   // ---------- UI / view helpers ----------
   offeringClicked = false;
   trackBySeg: TrackByFunction<ViewStateDto['english']['segments'][number]> = (_i, s) => s.id;
-  get doc$() { return this.store.doc$; }
+  get doc$() { return this.rundown.doc$; }
+
   // ----- SHIMS for current template -----
 
   // Used by multiple *ngFor (segments, etaToasts, sermonEndToasts, doc.segments)
@@ -184,19 +129,27 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
       if (id && id !== 'latest') {
         if (this.connected && id === this.runId) return;
         this.runId = id;
-        try { await this.hub.connect(this.runId); this.connected = true; }
+        try {
+          await this.hub.connect(this.runId);
+          this.connected = true;
+          this.rundown.init(this.runId);   // <— hook up rundown state to this run
+        }
         catch (e) { this.connectErr = e; console.error('[EnglishView] connect failed', e); }
         return;
       }
 
+      // If you still want a "latest" fallback, add a getLatestRunId() helper to RundownService and re-enable.
+      // For now, require a concrete :runId in the route.
+      // ===============================================================
       // Fallback to latest run when no id or "latest"
-      this.store.getLatestRunId().subscribe(async ({ runId }) => {
-        if (!runId) return;
-        if (this.connected && runId === this.runId) return;
-        this.runId = runId;
-        try { await this.hub.connect(runId); this.connected = true; }
-        catch (e) { this.connectErr = e; console.error('[EnglishView] connect failed', e); }
-      });
+      // ===============================================================
+      // this.store.getLatestRunId().subscribe(async ({ runId }) => {
+      //   if (!runId) return;
+      //   if (this.connected && runId === this.runId) return;
+      //   this.runId = runId;
+      //   try { await this.hub.connect(runId); this.connected = true; }
+      //   catch (e) { this.connectErr = e; console.error('[EnglishView] connect failed', e); }
+      // });
     });
 
 
@@ -230,6 +183,7 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
     this.subRoute?.unsubscribe();
     this.subState?.unsubscribe();
     this.hub.disconnect();
+    this.rundown.dispose();   // <— clean up the rundown hub/subscriptions
   }
 
   // =========================================================
