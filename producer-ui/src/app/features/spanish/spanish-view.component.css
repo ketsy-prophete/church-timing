@@ -1,0 +1,14 @@
+.titlebar { display:flex; align-items:center; }
+.clock { margin-left:auto; font-weight:600; white-space:nowrap; }
+.bar{display:flex;gap:12px;align-items:center;margin:8px 0}
+.dot{width:8px;height:8px;border-radius:50%;background:#bbb;display:inline-block;margin-left:6px}
+.dot.live{background:#2ecc71;animation:pulse 1s infinite}
+@keyframes pulse{0%{opacity:.4}50%{opacity:1}100%{opacity:.4}}
+table{border-collapse:collapse}
+th,td{padding:6px 8px;border:1px solid #ccc}
+.highlight { background:#d0d0d0; transition: background-color 300ms ease-in-out; }
+.dot.ended { background:#e53935; animation:none; }  /* solid red, no pulse */
+.time-red { color:#e53935; }                         /* 00:00 in red */
+.over{color:#16a34a}.under{color:#dc2626}
+.clock-time { font-weight:700; font-size:20px;}
+.clock-date { font-weight:500; font-size:12px; opacity:.8; line-height:1.99; }

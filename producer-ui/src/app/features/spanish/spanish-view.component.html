@@ -1,0 +1,120 @@
+<div style="padding:16px; font-family:system-ui">
+    <div class="titlebar">
+        <h2>Spanish Producer</h2>
+        <div class="clock">
+            <div class="clock-time">{{ etNow$ | async }} ET</div>
+            <div class="clock-date">{{ etDate$ | async }}</div>
+        </div>
+    </div>
+
+    <!-- Live status / master countdown -->
+    <div class="bar" *ngIf="vm$ | async as vm">
+        <ng-container *ngIf="vm.s?.masterStartAtUtc; else notStarted">
+            <span class="dot" [class.live]="vm.mc > 0" [class.ended]="vm.mc <= 0"></span>
+
+            <b [class.time-red]="vm.mc <= 0">
+                Master Timer – {{ (vm.mc > 0 ? vm.mc : 0) | mmss }}
+            </b>
+
+            <small *ngIf="(hub.lastSyncAgo$ | async) as secs">
+                Live • Updated
+                <ng-container *ngIf="secs < 60">&lt;1m</ng-container>
+                <ng-container *ngIf="secs >= 60">{{ (secs/60) | number:'1.0-0' }}m</ng-container>
+                ago
+            </small>
+        </ng-container>
+
+        <ng-template #notStarted><b style="color:#3BB143"> Master Timer Pending...</b></ng-template>
+    </div>
+
+
+    <div *ngIf="state as s">
+
+        <h3 style="margin-top:12px">Completed in English</h3>
+        <table>
+            <tr>
+                <th>#</th>
+                <th>Segment</th>
+                <th>Segment Drift</th>
+                <th>Total Drift</th>
+                <th>Status</th>
+                <th>Ended</th>
+            </tr>
+
+            <tr *ngFor="let row of completedEnglishWithRunning; let idx = index"
+                [class.highlight]="row.seg.id === lastCompletedId">
+                <td>{{ row.seg.order }}</td>
+                <td>{{ row.seg.name }}</td>
+
+                <td>{{ row.seg.driftSec | signedmmss }}</td>
+
+                <td [style.color]="row.running > 4 ? 'black' : row.running < -4 ? 'red' : 'inherit'">
+                    {{ row.running | signedmmss:true }}
+                </td>
+
+                <td>Complete</td>
+
+                <td>
+                    {{ endedAtFor(row.seg.id, completedEnglishSorted) | date:'h:mm a':'America/New_York' }}
+                </td>
+
+            </tr>
+        </table>
+
+        <!-- Bottom controls: place right under the table -->
+        <div style="margin-top:8px;">
+
+            <!-- LINE 1: Spanish ETA form + Current ETA (blue) -->
+            <div>
+                <label>Time Left:
+                    <input #eta size="5" placeholder="mm:ss" pattern="^\d{1,3}:[0-5]\d$"
+                        title="Enter minutes and seconds like 1:30" (keyup.enter)="setSpanishEtaFromText(eta.value)">
+                </label>
+
+                <button type="button" style="margin-left:12px;" (click)="setSpanishEtaFromText(eta.value)"
+                    [disabled]="!state?.masterStartAtUtc || !mmssValid(eta.value)">
+                    Send ETA
+                </button>
+
+                <span style="margin-left:12px; opacity:.95;">
+                    <span style="color:#1e40af; font-weight:700; font-size:13px">Current Time Left: </span>
+                    <ng-container *ngIf="currentSpanishRemainingSec() as rem; else noneEta">
+                        <span style="color:#1e40af; font-weight:700; font-size:13px">{{ rem | mmss }}</span>
+                    </ng-container>
+                    <ng-template #noneEta>—</ng-template>
+                </span>
+
+            </div>
+
+
+            <!-- LINE 3: Sermon Ended At (single spacing) -->
+
+            <div style="margin-top:40px;">
+                <p style="margin:8px 0 0 0;">
+                    <b>Sermon Ended At:</b>
+                    <ng-container *ngIf="state?.spanish?.sermonEndedAtSec as ended; else noneEnded">
+                        {{ ended | mmss }}
+                        <small style="margin-left:8px; opacity:.9">
+                            ({{ spanishEndedAtWallTime() | date:'h:mm a':'America/New_York' }})
+                        </small>
+                    </ng-container>
+                    <ng-template #noneEnded>—</ng-template>
+
+                </p>
+            </div>
+
+            <!-- LINE 2: Sermon End button (double spacing below the form) -->
+            <div style="margin-top:5px;">
+                <button (click)="sermonEnd()"
+                    [disabled]="sermonEndClicked || (state?.spanish?.sermonEndedAtSec ?? 0) > 0">
+                    Sermon End
+                </button>
+            </div>
+
+
+        </div>
+
+
+
+    </div>
+</div>
