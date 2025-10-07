@@ -1,14 +1,16 @@
-// src/app/features/rundown/rundown-editor/rundown-editor.component.ts
 import { Component, OnDestroy, OnInit, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormArray, FormBuilder, FormControl, FormGroup, Validators } from '@angular/forms';
-import { TimePipe } from '../../../shared/time.pipe';
-import { SignedTimePipe } from '../../../shared/signed-time.pipe';
+import { ActivatedRoute } from '@angular/router';
 import { debounceTime } from 'rxjs/operators';
-import { RundownSegment } from '../../../models/rundown.models';
-import { RundownService } from '../../../store/rundown.service';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { TrackByFunction } from '@angular/core';
+
+import { TimePipe } from '../../../shared/time.pipe';
+import { SignedTimePipe } from '../../../shared/signed-time.pipe';
+import { RundownSegment } from '../../../models/rundown.models';
+import { RundownService } from '../../../store/rundown.service';
+
 
 
 type RundownRow = {
@@ -35,7 +37,10 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
   overlapWarnings: string[] = [];
   private nextId = 1;
 
-  constructor(private fb: FormBuilder, private store: RundownService, private destroyRef: DestroyRef, private rundown: RundownService
+  constructor(private fb: FormBuilder,
+    private route: ActivatedRoute,
+    private rundown: RundownService,
+    private destroyRef: DestroyRef,
   ) {
     this.form = this.fb.group({
       serviceStart: this.fb.control<number>(0, { nonNullable: true }),
@@ -48,14 +53,17 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
 
 
   ngOnInit(): void {
+    this.runId = this.route.snapshot.paramMap.get('runId')!;
+    this.rundown.init(this.runId);
+
+
+
     // 1) React to store document changes
-    this.store.doc$
+    this.rundown.doc$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(doc => {
         this.isPatching = true;
 
-        // top control
-        this.form.controls.serviceStart.setValue(doc.serviceStartSec ?? 0, { emitEvent: false });
 
         const fa = this.segmentsArray;
         const storeSegs = doc.segments ?? [];
@@ -97,17 +105,18 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
         this.isPatching = false;
       });
 
-    // 2) Push top-level control changes to store
     this.form.controls.serviceStart.valueChanges
       .pipe(debounceTime(120), takeUntilDestroyed(this.destroyRef))
       .subscribe(val => {
         if (this.isPatching) return;
-        this.store.setServiceStart(val ?? 0);
+        this.rundown.setServiceStart(val ?? 0);
         this.recalc();
       });
   }
 
-  ngOnDestroy(): void { }
+  ngOnDestroy(): void {
+    this.rundown.dispose();
+  }
 
   private segmentGroup(s: Partial<RundownSegment> = {}) {
     const idValue = s.id ?? this.nextId++;
@@ -126,7 +135,7 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
     g.valueChanges.pipe(debounceTime(120)).subscribe(() => {
       if (this.isPatching) return;
       const v = g.getRawValue();
-      this.store.upsertSegment({ ...v });
+      this.rundown.upsertSegment({ ...v });
       this.recalc();
     });
 
@@ -152,7 +161,7 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
 
     // Tell the store right away so doc$ matches the UI
     this.isPatching = true;
-    this.store.upsertSegment({ ...newSeg });
+    this.rundown.upsertSegment({ ...newSeg });
     this.isPatching = false;
   }
 
@@ -168,15 +177,15 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
 
     // Keep store in sync immediately (prevents the "first keypress" blur/ghost row)
     this.isPatching = true;
-    this.store.upsertSegment({ ...newSeg });
+    this.rundown.upsertSegment({ ...newSeg });
     this.isPatching = false;
   }
 
-  remove(i: number) { this.store.remove(i); }
-  moveUp(i: number) { this.store.moveUp(i); }
-  moveDown(i: number) { this.store.moveDown(i); }
-  reflowStarts() { this.store.reflowStarts(); }
-  clearAll() { this.store.clearAll(); }
+  remove(i: number) { this.rundown.remove(i); }
+  moveUp(i: number) { this.rundown.moveUp(i); }
+  moveDown(i: number) { this.rundown.moveDown(i); }
+  reflowStarts() { this.rundown.reflowStarts(); }
+  clearAll() { this.rundown.clearAll(); }
 
   import(jsonStr: string) {
     const data = JSON.parse(jsonStr);
@@ -186,9 +195,10 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
     }
     this.form.controls.serviceStart.setValue(data.serviceStartSec ?? 0);
   }
-  exportPretty(): string { return this.store.exportPretty(); }
+  exportPretty(): string { return this.rundown.exportPretty(); }
 
-  private recalc() { this.totalSec = this.store.totalSec(); this.overlapWarnings = this.store.overlaps(); }
+  private recalc() { this.totalSec = this.rundown.totalSec(); this.overlapWarnings = this.rundown.overlaps(); }
+  private runId!: string;
 
   copyJson() {
     const text = this.exportPretty();
@@ -227,37 +237,24 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
   }
 
   pushToBackend() {
-    const items = this.segmentsArray.controls.map(fg => ({
-      Name: (fg.value.title ?? '').toString().trim() || 'Untitled',
-      PlannedSec: Number(fg.value.durationSec ?? 0) | 0
-    }));
-
-    const go = (runId: string) => {
-      this.rundown.startRun(runId).subscribe({
-        next: () => {
-          this.rundown.appendSegments(runId, items).subscribe({
-            next: res => {
-              console.log('Rundown appended', res);
-              // TODO: show toast “Rundown sent to Producer”
-            },
-            error: err => console.error('Append failed', err)
-          });
-        },
-        error: err => console.error('Start failed', err)
-      });
+    const dto = {
+      serviceStartSec: this.form.controls.serviceStart.value ?? 0,
+      segments: this.segmentsArray.controls.map(fg => ({
+        id: fg.controls.id.value,
+        title: fg.controls.title.value?.trim() || 'Untitled',
+        owner: fg.controls.owner.value || '',
+        startSec: fg.controls.startSec.value ?? 0,
+        durationSec: fg.controls.durationSec.value ?? 60,
+        notes: fg.controls.notes.value || '',
+        color: fg.controls.color.value || ''
+      }))
     };
 
-    const existing = this.rundown.runId;
-    if (existing) {
-      go(existing);
-    } else {
-      this.rundown.getLatestRunId().subscribe({
-        next: ({ runId }) => { this.rundown.setRunId(runId); go(runId); },
-        error: err => console.error('Could not get latest run id', err)
-      });
-    }
+    this.rundown.saveRundown(this.runId, dto).subscribe({
+      next: () => console.log('Rundown saved'),
+      error: err => console.error('Save failed', err)
+    });
   }
 
-
-
 }
+
