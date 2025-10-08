@@ -3,9 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using ChurchTiming.Api.Contracts;
 using ChurchTiming.Api.Data;
 
-
-
-
 var builder = WebApplication.CreateBuilder(args);
 
 // 1) Services
@@ -31,14 +28,55 @@ var app = builder.Build();
 
 app.UseRouting();
 
+// REMOVE app.MapHub<ServiceSyncHub>("/hubs/serviceSync"); 
+
 // 2) Middleware
 app.UseCors(CorsPolicy);
 
-// Controllers + Hub both require the same policy
-app.MapControllers().RequireCors(CorsPolicy);
+//REMOVE // Controllers + Hub both require the same policy
+// app.MapControllers().RequireCors(CorsPolicy);
 
-// 3) Hub
-app.MapHub<ServiceSyncHub>("/hubs/serviceSync").RequireCors(CorsPolicy);
+//REMOVE // 3) Hub
+// app.MapHub<ServiceSyncHub>("/hubs/serviceSync").RequireCors(CorsPolicy);
+
+static int SinceMasterStartSec(Run run) =>
+    (int)Math.Round((DateTime.UtcNow - run.MasterStartAtUtc!.Value).TotalSeconds);
+
+
+static object BuildState(Run run) => new
+{
+    runId = run.Id,
+    serverTimeUtc = DateTime.UtcNow.ToUniversalTime(),
+    masterStartAtUtc = run.MasterStartAtUtc,
+    preteachSec = run.PreteachSec,
+    walkBufferSec = run.WalkBufferSec,
+    baseOfferingSec = run.BaseOfferingSec,
+    spanish = new
+    {
+        sermonEndedAtSec = run.SpanishSermonEndedAtSec,
+        sermonEndEtaSec = run.SpanishSermonEndEtaSec
+    },
+    english = new
+    {
+        segments = run.Segments
+            .OrderBy(s => s.Order)
+            .Select(s => new
+            {
+                id = s.Id,
+                order = s.Order,
+                name = s.Name,
+                plannedSec = s.PlannedSec,
+                actualSec = s.ActualSec,
+                driftSec = s.DriftSec,
+                completed = s.Completed
+            }).ToArray(),
+        runningDriftBeforeOfferingSec = run.Segments
+            .Where(s => s.Completed)
+            .Sum(s => (int?)s.DriftSec ?? 0),
+        offeringStartedAtSec = run.EnglishOfferingStartedAtSec
+    },
+    offeringSuggestion = new { stretchSec = 0, offeringTargetSec = run.BaseOfferingSec }
+};
 
 
 // ---- Endpoints (EF-only) ----
@@ -73,28 +111,7 @@ app.MapGet("/api/runs/{id:guid}/state", async (Guid id, AppDbContext db) =>
     var run = await db.Runs.Include(r => r.Segments).FirstOrDefaultAsync(r => r.Id == id);
     if (run is null) return Results.NotFound();
 
-    var state = new
-    {
-        runId = run.Id,
-        serverTimeUtc = DateTime.UtcNow,
-        masterStartAtUtc = run.MasterStartAtUtc,
-        preteachSec = run.PreteachSec,
-        walkBufferSec = run.WalkBufferSec,
-        baseOfferingSec = run.BaseOfferingSec,
-        spanish = new { sermonEndedAtSec = run.SpanishSermonEndedAtSec, sermonEndEtaSec = run.SpanishSermonEndEtaSec },
-        english = new
-        {
-            segments = run.Segments
-                .OrderBy(s => s.Order)
-                .Select(s => new { id = s.Id, order = s.Order, name = s.Name, plannedSec = s.PlannedSec, actualSec = s.ActualSec, driftSec = s.DriftSec, completed = s.Completed })
-                .ToArray(),
-            runningDriftBeforeOfferingSec = 0,
-            offeringStartedAtSec = (int?)null
-        },
-        offeringSuggestion = new { stretchSec = 0, offeringTargetSec = run.BaseOfferingSec }
-    };
-
-    return Results.Ok(state);
+    return Results.Ok(BuildState(run));
 });
 
 // GET rundown
@@ -140,6 +157,49 @@ app.MapPost("/api/runs/{id:guid}/rundown/save", async (Guid id, List<RundownSegm
     return Results.Ok();
 });
 
+// 1) Complete a segment (idempotent)
+// Route: note :int on segmentId
+app.MapPost("/api/runs/{id:guid}/english/segments/{segmentId:int}/complete",
+async (Guid id, int segmentId, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
+{
+    var run = await db.Runs.Include(r => r.Segments).FirstOrDefaultAsync(r => r.Id == id);
+    if (run is null || run.MasterStartAtUtc is null) return Results.BadRequest("Run not live or not found");
+
+    var seg = run.Segments.FirstOrDefault(s => s.Id == segmentId); // int == int ✅
+    if (seg is null) return Results.NotFound();
+
+    if (!seg.Completed)
+    {
+        seg.Completed = true;
+        seg.ActualSec ??= (int)Math.Round((DateTime.UtcNow - run.MasterStartAtUtc.Value).TotalSeconds);
+        await db.SaveChangesAsync();
+        await hub.Clients.Group(id.ToString()).StateUpdated(BuildState(run));
+    }
+    return Results.Ok();
+});
+
+// 2) Start offering (idempotent)
+app.MapPost("/api/runs/{id:guid}/english/offering/start",
+async (Guid id, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
+{
+    var run = await db.Runs
+        .Include(r => r.Segments)
+        .FirstOrDefaultAsync(r => r.Id == id);
+
+    if (run is null || run.MasterStartAtUtc is null)
+        return Results.BadRequest("Run not live or not found");
+
+    if (run.EnglishOfferingStartedAtSec is null)
+    {
+        run.EnglishOfferingStartedAtSec = SinceMasterStartSec(run);
+        await db.SaveChangesAsync();
+        var state = BuildState(run!);
+        await hub.Clients.Group(id.ToString()).StateUpdated(state);
+    }
+
+    return Results.Ok();
+});
+
 // Spanish ETA
 app.MapPost("/api/runs/{id:guid}/spanish/eta", async (Guid id, int etaSec, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
 {
@@ -147,7 +207,7 @@ app.MapPost("/api/runs/{id:guid}/spanish/eta", async (Guid id, int etaSec, AppDb
     if (run is null) return Results.NotFound();
     run.SpanishSermonEndEtaSec = etaSec;
     await db.SaveChangesAsync();
-    await hub.Clients.All.SpanishEtaUpdated(id, etaSec);
+    await hub.Clients.Group(id.ToString()).SpanishEtaUpdated(id, etaSec);
     return Results.Ok();
 });
 
@@ -159,7 +219,7 @@ app.MapPost("/api/runs/{id:guid}/spanish/ended", async (Guid id, int? endedAtSec
     var sec = endedAtSec ?? (int)Math.Round((DateTime.UtcNow - run.MasterStartAtUtc.Value).TotalSeconds);
     run.SpanishSermonEndedAtSec ??= sec;
     await db.SaveChangesAsync();
-    await hub.Clients.All.SpanishEnded(id, run.SpanishSermonEndedAtSec.Value);
+    await hub.Clients.Group(id.ToString()).SpanishEnded(id, run.SpanishSermonEndedAtSec.Value);
     return Results.Ok(new { sermonEndedAtSec = run.SpanishSermonEndedAtSec });
 });
 
@@ -187,6 +247,8 @@ app.MapGet("/__hud/{id:guid}", async (Guid id, AppDbContext db) =>
         "text/plain");
 });
 
+app.MapControllers();
+app.MapHub<ServiceSyncHub>("/hubs/serviceSync");
 
 app.Run();
 

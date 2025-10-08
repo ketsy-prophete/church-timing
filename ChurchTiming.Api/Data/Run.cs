@@ -11,7 +11,6 @@ public class Run
     public int WalkBufferSec { get; set; }
     public int BaseOfferingSec { get; set; }
     public int? EnglishOfferingStartedAtSec { get; set; }
-
     public int? SpanishSermonEndedAtSec { get; set; }
     public int? SpanishSermonEndEtaSec { get; set; }
     public List<RundownSegment> Segments { get; set; } = new();

@@ -1,12 +1,14 @@
 using Microsoft.AspNetCore.SignalR;
+using ChurchTiming.Api.Contracts; // uses the one interface above
 
-namespace ChurchTiming.Api.Contracts;
-
-public class ServiceSyncHub : Hub<ISyncClient>
+namespace ChurchTiming.Api.Contracts
 {
-    public Task JoinRun(Guid runId) =>
-        Groups.AddToGroupAsync(Context.ConnectionId, runId.ToString());
+    public class ServiceSyncHub : Hub<ISyncClient>
+    {
+        public Task JoinRun(Guid runId) =>
+            Groups.AddToGroupAsync(Context.ConnectionId, runId.ToString());
 
-    public Task LeaveRun(Guid runId) =>
-        Groups.RemoveFromGroupAsync(Context.ConnectionId, runId.ToString());
+        public Task LeaveRun(Guid runId) =>
+            Groups.RemoveFromGroupAsync(Context.ConnectionId, runId.ToString());
+    }
 }
