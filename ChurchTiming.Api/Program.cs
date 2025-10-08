@@ -129,35 +129,66 @@ app.MapGet("/api/runs/{id:guid}/rundown", async (Guid id, AppDbContext db) =>
     return Results.Ok(segments);
 });
 
-// SAVE rundown (replace all)
-app.MapPost("/api/runs/{id:guid}/rundown/save", async (Guid id, List<RundownSegmentSaveDto> items, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
+// Bulk SAVE (upsert) English segments
+app.MapPost("/api/runs/{id:guid}/english/segments",
+async (Guid id, SegmentUpsertDto[] payload, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
 {
     var run = await db.Runs.Include(r => r.Segments).FirstOrDefaultAsync(r => r.Id == id);
     if (run is null) return Results.NotFound();
 
-    using var tx = await db.Database.BeginTransactionAsync();
-    db.Segments.RemoveRange(run.Segments);
-    await db.SaveChangesAsync();
+    // Index existing segments by Id
+    var byId = run.Segments.ToDictionary(s => s.Id);
 
-    var newSegs = items.Select((it, i) => new RundownSegment
+    // Track which server ids are present in the incoming payload
+    var seenServerIds = new HashSet<int>();
+
+    foreach (var dto in payload.OrderBy(p => p.Order))
     {
-        RunId = id,
-        Order = it.order ?? i,
-        Name = it.name ?? "",
-        PlannedSec = it.plannedSec,
-        ActualSec = it.actualSec,
-        DriftSec = it.driftSec,
-        Completed = it.completed ?? false
-    });
-    await db.Segments.AddRangeAsync(newSegs);
-    await db.SaveChangesAsync();
-    await tx.CommitAsync();
+        // Try to map incoming dto.Id (string) to server int id; if parse fails => treat as new
+        var hasServerId = int.TryParse(dto.Id, out var serverId) && byId.ContainsKey(serverId);
+        if (hasServerId)
+        {
+            var seg = byId[serverId];
+            seg.Order = dto.Order;
+            seg.Name = dto.Name;
+            seg.PlannedSec = dto.PlannedSec;
+            // Do NOT touch seg.ActualSec/Completed on bulk save
+            seenServerIds.Add(serverId);
+        }
+        else
+        {
+            // New segment
+            run.Segments.Add(new RundownSegment
+            {
+                RunId = id,            
+                Order = dto.Order,
+                Name = dto.Name,
+                PlannedSec = dto.PlannedSec,
+                // ActualSec, Completed left null/false
+            });
+        }
+    }
 
-    await hub.Clients.All.RundownUpdated(id);
+    // Remove segments not present in payload, but only if they haven't been completed/timed
+    var toRemove = run.Segments
+        .Where(s => !seenServerIds.Contains(s.Id))
+        .Where(s => payload.All(p => !(int.TryParse(p.Id, out var pid) && pid == s.Id)))
+        .Where(s => s.ActualSec is null && !s.Completed)
+        .ToList();
+
+    if (toRemove.Count > 0)
+        db.RemoveRange(toRemove);
+
+    await db.SaveChangesAsync();
+
+    // Broadcast fresh state so all clients (English/Spanish) refresh immediately
+    var state = BuildState(run);
+    await hub.Clients.Group(id.ToString()).StateUpdated(state);
+
     return Results.Ok();
 });
 
-// 1) Complete a segment (idempotent)
+// Complete a segment (idempotent)
 // Route: note :int on segmentId
 app.MapPost("/api/runs/{id:guid}/english/segments/{segmentId:int}/complete",
 async (Guid id, int segmentId, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
@@ -222,6 +253,19 @@ app.MapPost("/api/runs/{id:guid}/spanish/ended", async (Guid id, int? endedAtSec
     await hub.Clients.Group(id.ToString()).SpanishEnded(id, run.SpanishSermonEndedAtSec.Value);
     return Results.Ok(new { sermonEndedAtSec = run.SpanishSermonEndedAtSec });
 });
+
+// 4) (V2 backend only) OVERRIDE SPANISH END ---------------------------------
+// app.MapPost("/api/runs/{id:guid}/spanish/ended/override",
+// ([FromRoute] Guid id, [FromBody] int endedAtSec,
+//  RunRepository repo, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
+// {
+//     var run = repo.Get(id);
+//     if (run is null || run.MasterStartAtUtc is null) return Results.BadRequest("Run not live or not found");
+
+//     run.SermonEndedAtSec = endedAtSec;   // force replace
+//     repo.Save(run);
+//     return Results.Ok();
+// });
 
 // Utility/health
 app.MapGet("/ping", () => Results.Ok(new { ok = true, time = DateTime.UtcNow }));
