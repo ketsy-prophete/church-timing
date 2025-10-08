@@ -1,11 +1,12 @@
 import { Injectable } from '@angular/core';
 import * as signalR from '@microsoft/signalr';
-import { BehaviorSubject, combineLatest, interval, map, startWith, Subscription, EMPTY } from 'rxjs';
+import { BehaviorSubject, combineLatest, interval, map, startWith, Subscription, EMPTY, firstValueFrom } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../environments/environment';
 import { switchMap, catchError } from 'rxjs/operators';
 
 export interface SegmentDto { id: string; order: number; name: string; plannedSec: number; actualSec?: number; driftSec?: number; completed: boolean; }
+
 export interface StateDto {
   runId: string;
   serverTimeUtc: string;               // ISO string from backend
@@ -43,10 +44,13 @@ export class SignalrService {
 
   serverNowMs() { return Date.now() - this.serverOffsetMs; }
 
+  // ==================== START OF Connect =========================//
 
   async connect(runId: string) {
-    // Build the connection if missing or fully disconnected
-    if (!this.hub || this.hub.state === signalR.HubConnectionState.Disconnected) {
+    this.currentRunId = runId;
+
+    // Build once
+    if (!this.hub) {
       this.hub = new signalR.HubConnectionBuilder()
         .withUrl(environment.hubUrl)
         .withAutomaticReconnect()
@@ -65,79 +69,62 @@ export class SignalrService {
       this.hub.onreconnecting(() => this.startPolling(this.currentRunId ?? runId));
       this.hub.onreconnected(async () => {
         this.stopPolling();
-        await this.syncOnce(this.currentRunId ?? runId);
+        if (this.currentRunId) {
+          // rejoin group after a reconnect, then hydrate
+          await this.joinRun(this.currentRunId);
+          await this.syncOnce(this.currentRunId);
+        }
       });
       this.hub.onclose(() => this.startPolling(this.currentRunId ?? runId));
     }
 
-    try {
-      await this.hub.start();                // <— will throw if hubUrl is wrong/not reachable
-      this.stopPolling();
-      await this.syncOnce(runId);            // initial state fetch via REST
-    } catch (err) {
-      console.error('[SignalR] start failed', err);
-      this.startPolling(runId);              // graceful fallback
+    // If a start() is already in-flight, wait for it
+    if (this.hub.state === signalR.HubConnectionState.Connecting && this.starting) {
+      await this.starting;
     }
-  }
 
-  // Simple one-shot REST fetch used above
+    // If not connected yet, start and hydrate via polling while we wait
+    if (this.hub.state !== signalR.HubConnectionState.Connected) {
+      if (!this.starting) {
+        this.starting = (async () => {
+          await this.hub!.start();
+          this.connected = true;
+        })();
+      }
+
+      // Hydrate UI while hub connects
+      this.startPolling(runId);
+
+      try {
+        await this.starting;
+      } catch (err) {
+        console.error('[SignalR] start failed', err);
+        // Keep polling; bail early
+        this.starting = undefined;
+        return;
+      } finally {
+        this.starting = undefined;
+      }
+    }
+
+    // Connected: stop polling, join group, do one REST sync
+    this.stopPolling();
+    await this.joinRun(runId);
+    await this.syncOnce(runId);
+  }
+  // ==================== END OF Connect =========================//
+
+
+  // ==================== START OF SyncOnce =========================//
   private async syncOnce(runId: string) {
     const url = `${environment.apiBaseUrl}/api/runs/${runId}/state`;
     const state = await firstValueFrom(this.http.get<StateDto>(url));
     this.lastSyncAt = Date.now();
     this.serverOffsetMs = Date.now() - Date.parse(state.serverTimeUtc);
     this.state$.next(state);
-    
-    // If a start() is already in-flight, wait and just (re)join.
-    if (this.starting) {
-      await this.starting;
-      await this.joinRun(runId);
-      this.currentRunId = runId;
-      this.getState(runId).subscribe(s => this.state$.next(s));
-      return;
-    }
-
-    if (this.hub && this.hub.state !== signalR.HubConnectionState.Disconnected) {
-      // Already connected/reconnecting: (re)join and hydrate; no start() call.
-      await this.joinRun(runId);
-      this.currentRunId = runId;
-      this.getState(runId).subscribe(s => this.state$.next(s));
-      return;
-    }
-    // if already connected/connecting, keep your existing guard logic...
-    // (unchanged)
-
-    // Kick off polling immediately so UI hydrates before hub connects
-    this.startPolling(runId);
-
-    // Start hub (with your existing start lock)
-    this.starting = (async () => {
-      await this.hub!.start();
-      this.connected = true;
-    })();
-    try { await this.starting; } finally { this.starting = undefined; }
-
-    // Join the group + one-time snapshot
-    await this.joinRun(runId);
-    this.currentRunId = runId;
-    this.getState(runId).subscribe(s => this.state$.next(s));
-
-
-    // Kick off polling **now** so the UI hydrates even before hub connects
-    this.startPolling(runId);
-
-    // Start hub (your existing lock logic is fine)
-    this.starting = (async () => {
-      await this.hub!.start();
-      this.connected = true;
-    })();
-    try { await this.starting; } finally { this.starting = undefined; }
-
-    // Join group + one-time snapshot (keep your existing lines)
-    await this.joinRun(runId);
-    this.currentRunId = runId;
-    this.getState(runId).subscribe(s => this.state$.next(s));
   }
+
+  // ==================== END OF SyncOnce =========================//
 
 
   // Add to SignalrService (below connect/fields)
@@ -200,18 +187,27 @@ export class SignalrService {
   );
 
   // --------- Client → Server hub methods (names must match backend) ----------
+  // joinRun used to join the SignalR group
   joinRun(runId: string) { return this.hub!.invoke('JoinRun', runId); }
-  startRun(runId: string) { return this.hub!.invoke('StartRun', runId); }
-  sermonEnded(runId: string) { return this.hub!.invoke('SermonEnded', runId); }
-  startOffering(runId: string) { return this.hub!.invoke('StartOffering', runId); }
+
+
+  startRun(runId: string) {
+    return firstValueFrom(this.http.post(`${environment.apiBaseUrl}/api/runs/${runId}/start`, {}));
+  }
+  sermonEnded(runId: string) {
+    return firstValueFrom(this.http.post(`${environment.apiBaseUrl}/api/runs/${runId}/spanish/ended`, {}));
+  }
+  startOffering(runId: string) {
+    return firstValueFrom(this.http.post(`${environment.apiBaseUrl}/api/runs/${runId}/offering/start`, {}));
+  }
   completeSegment(runId: string, segmentId: string) {
-    return this.hub!.invoke('CompleteSegment', runId, segmentId);
+    return firstValueFrom(this.http.post(`${environment.apiBaseUrl}/api/runs/${runId}/segments/${segmentId}/complete`, {}));
   }
   setSpanishEta(runId: string, etaSec: number) {
-    return this.hub!.invoke('SetSpanishEta', runId, etaSec);
+    return firstValueFrom(this.http.post(
+      `${environment.apiBaseUrl}/api/runs/${runId}/spanish/eta?etaSec=${etaSec}`, {}));
   }
 
-  // --------- HTTP endpoints (create/get state) ----------
   createRun(dto: CreateRunDto) {
     return this.http.post<{ runId: string }>(`${environment.apiBaseUrl}/api/runs`, dto);
   }
