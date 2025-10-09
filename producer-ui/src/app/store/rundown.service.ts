@@ -16,7 +16,7 @@ export class RundownService {
     private hub?: signalR.HubConnection;
     private runId: string | null = null;
 
-    private api = environment.apiBaseUrl; 
+    private api = environment.apiBaseUrl;
 
 
     constructor(private http: HttpClient) { }
@@ -37,7 +37,7 @@ export class RundownService {
 
 
     // ---- lifecycle ----
-    init(runId: string) {
+    async init(runId: string) {
         if (this.runId === runId && this.hub && this.hub.state === signalR.HubConnectionState.Connected) return;
         this.runId = runId;
 
@@ -62,19 +62,21 @@ export class RundownService {
             catch { try { await this.hub!.invoke('JoinRun', this.runId); } catch { } }
         });
 
+        try {
+            await this.hub.start();
+            if (!this.runId) return;
+            try { await this.hub!.invoke('Join', this.runId); }
+            catch { try { await this.hub!.invoke('JoinRun', this.runId); } catch (e) { console.warn('join failed', e); } }
+        } catch (err) {
+            console.error('hub start failed', err);
+        }
 
-        this.hub.start()
-            .then(async () => {
-                if (!this.runId) return;
-                try { await this.hub!.invoke('Join', this.runId); }
-                catch { try { await this.hub!.invoke('JoinRun', this.runId); } catch (e) { console.warn('join failed', e); } }
-            })
-            .catch(err => console.error('hub start failed', err));
     }
 
     dispose() {
         this.hub?.stop().catch(() => { });
         this.hub = undefined;
+        this.runId = null;
     }
 
     // ---- server calls ----
@@ -98,7 +100,8 @@ export class RundownService {
                 const r: RundownSegment = {
                     id: (typeof s.id === 'number' && Number.isFinite(s.id))
                         ? s.id
-                        : (Number.parseInt(String(s.id), 10) || 0), title: s.name ?? '',
+                        : (Number.parseInt(String(s.id), 10) || 0),
+                    title: s.name ?? '',
                     owner: '',
                     startSec: t,
                     durationSec: Math.max(0, s.plannedSec ?? 0),
@@ -173,5 +176,13 @@ export class RundownService {
         // simple placeholder; keep your prior logic if you had it
         return [];
     }
+
+    // RundownService
+    async startOffering(runId: string): Promise<void> {
+        const url = `${this.api}/api/runs/${runId}/english/offering/start`;
+        await firstValueFrom(this.http.post<void>(url, {}));
+        // No local mutation needed; server will broadcast StateUpdated.
+    }
+
 }
 

@@ -1,5 +1,5 @@
 export const environment = {
   production: false,
-  apiBaseUrl: 'https://pick-village-all-island.trycloudflare.com',
-  hubUrl: ' https://pick-village-all-island.trycloudflare.com/hubs/serviceSync'
+  apiBaseUrl: 'https://moment-goto-syndrome-backed.trycloudflare.com',
+  hubUrl: 'https://moment-goto-syndrome-backed.trycloudflare.com/hubs/serviceSync'
 };

@@ -36,7 +36,6 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
   // ---------- DI ----------
   private route = inject(ActivatedRoute);
   private fb = inject(FormBuilder);
-  private rundown = inject(RundownService);
   public hub = inject(SignalrService);
 
   // ---------- Route / connection ----------
@@ -57,6 +56,8 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
   vm$!: Observable<{ mc: number; s: ViewStateDto | null }>;
   vmView$!: Observable<{ mc: number; s: ViewStateDto | null }>;
 
+  constructor(private rundownService: RundownService) { }
+
   // ---------- Forms ----------
   etaForm = this.fb.group({
     etaSec: this.fb.control<number | null>(null),
@@ -65,7 +66,7 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
   // ---------- UI / view helpers ----------
   offeringClicked = false;
   trackBySeg: TrackByFunction<ViewStateDto['english']['segments'][number]> = (_i, s) => s.id;
-  get doc$() { return this.rundown.doc$; }
+  get doc$() { return this.rundownService.doc$; }
 
   // ----- SHIMS for current template -----
 
@@ -130,7 +131,8 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
       this.runId = id;
       try {
         await this.hub.connect(id);
-        this.rundown.init(id);
+        this.rundownService.init(id);
+        this.connected = true;
       } catch (e) {
         console.error('[EnglishView] connect failed', e);
         // (optional) set a field like this.connectErr = e;
@@ -183,19 +185,26 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
     this.subRoute?.unsubscribe();
     this.subState?.unsubscribe();
     this.hub.disconnect();
-    this.rundown.dispose();   // <— clean up the rundown hub/subscriptions
+    this.rundownService.dispose();   // <— clean up the rundown hub/subscriptions
   }
 
   // =========================================================
   // Actions (UI handlers)
   // =========================================================
   startRun() { if (this.runId) this.hub.startRun(this.runId); }
+
   sermonEnded() { if (this.runId) this.hub.sermonEnded(this.runId); }
-  startOffering() {
+
+  async startOffering() {
     if (!this.runId || this.offeringClicked) return;
     this.offeringClicked = true;
-    this.hub.startOffering(this.runId);
+    try {
+      await this.rundownService.startOffering(this.runId);
+    } finally {
+      this.offeringClicked = false; // optional: reset if you want re-click ability
+    }
   }
+
   completeSegment(segId: string) { if (this.runId) this.hub.completeSegment(this.runId, segId); }
 
   setEta(delta?: number) {

@@ -6,6 +6,7 @@ import { debounceTime } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { TrackByFunction } from '@angular/core';
 
+
 import { TimePipe } from '../../../shared/time.pipe';
 import { SignedTimePipe } from '../../../shared/signed-time.pipe';
 import { RundownSegment } from '../../../models/rundown.models';
@@ -50,12 +51,13 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
 
   private isPatching = false;
   compact = true; // v1: show only #, Title, Start, Dur, End, Actions
+  private notify(msg: string) { console.log(msg); } // swap for MatSnackBar or your toast later
 
 
-  ngOnInit(): void {
-    this.runId = this.route.snapshot.paramMap.get('runId')!;
-    this.rundown.init(this.runId);
 
+  async ngOnInit(): Promise<void> {
+    this.runId = this.route.snapshot.paramMap.get('runId') ?? this.route.snapshot.paramMap.get('id')!;
+    await this.rundown.init(this.runId);
 
 
     // 1) React to store document changes
@@ -241,10 +243,7 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
   }
 
   trackBySegment: TrackByFunction<FormGroup<RundownRow>> =
-    (_: number, g) => g;
-
-
-
+    (_: number, g) => g.controls.id.value;
 
   // Helper to make a row (accepts values, not controls)
   private createRow(init: Partial<RundownSegment> = {}): FormGroup<RundownRow> {
@@ -271,25 +270,23 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
     }
   }
 
-  pushToBackend() {
-    const dto = {
-      serviceStartSec: this.form.controls.serviceStart.value ?? 0,
-      segments: this.segmentsArray.controls.map(fg => ({
-        id: fg.controls.id.value,
-        title: fg.controls.title.value?.trim() || 'Untitled',
-        owner: fg.controls.owner.value || '',
-        startSec: fg.controls.startSec.value ?? 0,
-        durationSec: fg.controls.durationSec.value ?? 60,
-        notes: fg.controls.notes.value || '',
-        color: fg.controls.color.value || ''
-      }))
-    };
+  async saveToProducer() {
+    const segments: RundownSegment[] = this.segmentsArray.controls.map(fg => ({
+      id: fg.controls.id.value ?? 0,
+      title: fg.controls.title.value?.trim() || 'Untitled',
+      owner: fg.controls.owner.value || '',
+      startSec: fg.controls.startSec.value ?? 0,
+      durationSec: fg.controls.durationSec.value ?? 60,
+      notes: fg.controls.notes.value || '',
+      color: fg.controls.color.value || ''
+    }));
 
-    this.rundown.saveRundown(this.runId, dto).subscribe({
-      next: () => console.log('Rundown saved'),
-      error: err => console.error('Save failed', err)
-    });
+    try {
+      await this.rundown.saveToProducer(this.runId!, segments);
+      this.notify('Saved to Producer');
+    } catch (err) {
+      console.error('Save failed', err);
+    }
   }
-
 }
 
