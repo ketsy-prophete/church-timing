@@ -160,7 +160,7 @@ async (Guid id, SegmentUpsertDto[] payload, AppDbContext db, IHubContext<Service
             // New segment
             run.Segments.Add(new RundownSegment
             {
-                RunId = id,            
+                RunId = id,
                 Order = dto.Order,
                 Name = dto.Name,
                 PlannedSec = dto.PlannedSec,
@@ -176,8 +176,12 @@ async (Guid id, SegmentUpsertDto[] payload, AppDbContext db, IHubContext<Service
         .Where(s => s.ActualSec is null && !s.Completed)
         .ToList();
 
-    if (toRemove.Count > 0)
-        db.RemoveRange(toRemove);
+    var toDelete = await db.Segments
+    .Where(s => s.RunId == id)
+    .ToListAsync();
+
+    db.RemoveRange(toDelete);
+
 
     await db.SaveChangesAsync();
 
