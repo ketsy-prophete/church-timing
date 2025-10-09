@@ -39,7 +39,8 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
   totalSec = 0;
   overlapWarnings: string[] = [];
   private nextId = 1;
-  private runId!: string;
+  public runId!: string;
+  saving = false;
 
   constructor(private fb: FormBuilder,
     private route: ActivatedRoute,
@@ -275,22 +276,28 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
   }
 
   async saveToProducer() {
-    const segments: RundownSegment[] = this.segmentsArray.controls.map(fg => ({
-      id: fg.controls.id.value ?? 0,
-      title: fg.controls.title.value?.trim() || 'Untitled',
-      owner: fg.controls.owner.value || '',
-      startSec: fg.controls.startSec.value ?? 0,
-      durationSec: fg.controls.durationSec.value ?? 60,
-      notes: fg.controls.notes.value || '',
-      color: fg.controls.color.value || ''
+    if (!this.runId || this.saving) return;
+
+    // Map your form rows → API SegmentDto
+    const payload = this.segmentsArray.controls.map((fg, i) => ({
+      id: "",                                     // force DB to generate new ids
+      order: i + 1,                               // or use a dedicated order control if you have one
+      name: (fg.controls.title.value ?? '').trim(),
+      plannedSec: fg.controls.durationSec.value ?? 0,
+      actualSec: null
     }));
 
+    this.saving = true;
     try {
-      await this.rundown.saveToProducer(this.runId!, segments);
+      await this.rundown.postEnglishSegments(this.runId, payload); // see service helper below
       this.notify('Saved to Producer');
+      // Do NOT manually patch UI — wait for StateUpdated
     } catch (err) {
       console.error('Save failed', err);
+    } finally {
+      this.saving = false;
     }
   }
+
 }
 

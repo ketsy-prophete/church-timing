@@ -15,7 +15,7 @@
       <button type="button" (click)="addSegment()">Add segment</button>
       <button type="button" (click)="clearAll()">Clear</button>
 
-      <button type="button" (click)="saveToProducer()">Save to Producer</button>
+      <button type="button" (click)="saveToProducer()" [disabled]="saving || !runId">Save to Producer</button>
 
 
       <!-- Hidden in v1 -->

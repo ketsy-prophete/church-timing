@@ -184,5 +184,13 @@ export class RundownService {
         // No local mutation needed; server will broadcast StateUpdated.
     }
 
+    postEnglishSegments(runId: string, segs: any[]) {
+        return firstValueFrom(
+            this.http.post(
+                `${environment.apiBaseUrl}/api/runs/${runId}/english/segments`, segs, {
+                headers: { 'Content-Type': 'application/json' }
+            })
+        );
+    }
 }
 
