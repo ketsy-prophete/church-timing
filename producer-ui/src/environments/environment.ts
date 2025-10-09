@@ -1,5 +1,5 @@
 export const environment = {
   production: false,
-  apiBaseUrl: 'https://moment-goto-syndrome-backed.trycloudflare.com',
-  hubUrl: 'https://moment-goto-syndrome-backed.trycloudflare.com/hubs/serviceSync'
+  apiBaseUrl: 'https://institution-productive-jpeg-mainstream.trycloudflare.com',
+  hubUrl: 'https://institution-productive-jpeg-mainstream.trycloudflare.com/hubs/serviceSync'
 };

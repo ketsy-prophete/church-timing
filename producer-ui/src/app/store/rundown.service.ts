@@ -46,7 +46,7 @@ export class RundownService {
         this.runId = runId;
 
         // initial load from API
-        this.reload();
+        await this.reload();
 
         // connect SignalR
         this.hub = new signalR.HubConnectionBuilder()
@@ -59,18 +59,25 @@ export class RundownService {
             this.applyStateToDoc(state);
         });
 
-        // on reconnect, re-join the run group
+        // on reconnect, re-join the run group and force a fresh pull
         this.hub.onreconnected(async () => {
-            if (this.runId) {
-                try { await this.hub!.invoke('JoinRun', this.runId); }
-                catch (e) { console.warn('rejoin failed', e); }
+            if (!this.runId) return;
+            try {
+                await this.hub!.invoke('JoinRun', this.runId);
+                await this.reload();                  // ← hard refresh after any gap
+            } catch (e) {
+                console.warn('rejoin/reload failed', e);
             }
         });
+
         try {
             await this.hub.start();
             if (!this.runId) return;
-            try { await this.hub!.invoke('Join', this.runId); }
-            catch { try { await this.hub!.invoke('JoinRun', this.runId); } catch (e) { console.warn('join failed', e); } }
+            try {
+                await this.hub.invoke('JoinRun', this.runId); // ← use JoinRun consistently
+            } catch (e) {
+                console.warn('join failed', e);
+            }
         } catch (err) {
             console.error('hub start failed', err);
         }

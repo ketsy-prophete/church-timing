@@ -44,12 +44,14 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
   runId!: string;
   connected = false;
   connectErr: unknown = null;
+showMiniRundown = false;
 
   // ---------- Reactive state exposed to template ----------
   state$ = this.hub.state$;
   isLive$ = this.hub.isLive$;
   lastSyncAgo$ = this.hub.lastSyncAgo$;
   masterCountdown$ = this.hub.masterCountdown$;
+  
 
   state: ViewStateDto | null = null;
 

@@ -148,7 +148,7 @@
 
 <!-- Producer Rundown (from RundownService) -->
 
-<section *ngIf="doc$ | async as doc">
+<section *ngIf="showMiniRundown && (doc$ | async) as doc" >//*ngIf="doc$ | async as doc"
   <div class="segments-head">
     <h3>Rundown</h3>
     <span class="total-drift">Total: {{ totalDurationSec(doc) | mmss }}</span>
