@@ -27,8 +27,6 @@ type StateDto = BaseStateDto & {
 
 export class SpanishViewComponent implements OnInit, OnDestroy {
   state: StateDto | null = null;
-  // private runId!: string;
-
   private route = inject(ActivatedRoute);
   private rundown = inject(RundownService);
   public hub = inject(SignalrService);
@@ -67,9 +65,6 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
   mmssValid(v: string): boolean {
     return /^\d{1,3}:[0-5]\d$/.test((v ?? '').trim());
   }
-
-
-  constructor() { }
 
   async ngOnInit() {
 
