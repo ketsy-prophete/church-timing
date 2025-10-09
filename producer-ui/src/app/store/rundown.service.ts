@@ -5,7 +5,8 @@ import * as signalR from '@microsoft/signalr';
 
 import { environment } from '../../environments/environment';
 import { RundownDoc, RundownSegment } from '../models/rundown.models';
-import { SegmentUpsertDto } from '../models/rundown.models'; 
+import { SegmentUpsertDto, StateDto } from '../models/rundown.models';
+
 
 
 @Injectable({ providedIn: 'root' })
@@ -13,6 +14,8 @@ export class RundownService {
     // ---- state ----
     private _doc$ = new BehaviorSubject<RundownDoc>({ serviceStartSec: 0, segments: [] });
     readonly doc$ = this._doc$.asObservable();
+    private readonly state$ = new BehaviorSubject<StateDto | null>(null);
+
 
     private hub?: signalR.HubConnection;
     private runId: string | null = null;
@@ -58,11 +61,11 @@ export class RundownService {
 
         // on reconnect, re-join the run group
         this.hub.onreconnected(async () => {
-            if (!this.runId) return;
-            try { await this.hub!.invoke('Join', this.runId); }
-            catch { try { await this.hub!.invoke('JoinRun', this.runId); } catch { } }
+            if (this.runId) {
+                try { await this.hub!.invoke('JoinRun', this.runId); }
+                catch (e) { console.warn('rejoin failed', e); }
+            }
         });
-
         try {
             await this.hub.start();
             if (!this.runId) return;
@@ -186,7 +189,7 @@ export class RundownService {
     }
 
     postEnglishSegments(runId: string, segs: SegmentUpsertDto[]) {
-        const url = `${this.api}/api/runs/${runId}/english/segments`; 
+        const url = `${this.api}/api/runs/${runId}/english/segments`;
         return firstValueFrom(this.http.post(url, segs, {
             headers: { 'Content-Type': 'application/json' },
             withCredentials: true

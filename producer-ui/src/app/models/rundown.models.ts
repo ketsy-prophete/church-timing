@@ -18,4 +18,10 @@ export interface SegmentUpsertDto {
   name: string;
   plannedSec: number;
 }
+export interface StateDto {
+  runId: string;
+  segments: any[];
+  [key: string]: any;
+}
+
 
