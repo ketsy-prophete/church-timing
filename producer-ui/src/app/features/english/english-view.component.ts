@@ -195,15 +195,28 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
 
   sermonEnded() { if (this.runId) this.hub.sermonEnded(this.runId); }
 
+  // async startOffering() {
+  //   if (!this.runId || this.offeringClicked) return;
+  //   this.offeringClicked = true;
+  //   try {
+  //     await this.rundownService.startOffering(this.runId);
+  //   } finally {
+  //     this.offeringClicked = false; // optional: reset if you want re-click ability
+  //   }
+  // }
+
   async startOffering() {
-    if (!this.runId || this.offeringClicked) return;
+    const s = this.hub.state$.value as ViewStateDto | null;
+    if (!this.runId || this.isOfferingLocked(s) || this.offeringClicked) return;
+
     this.offeringClicked = true;
     try {
       await this.rundownService.startOffering(this.runId);
     } finally {
-      this.offeringClicked = false; // optional: reset if you want re-click ability
+      this.offeringClicked = false;  // optional: reset if you want re-click ability
     }
   }
+
 
   completeSegment(segId: string) { if (this.runId) this.hub.completeSegment(this.runId, segId); }
 
@@ -224,11 +237,22 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
   // =========================================================
   // View helpers (segments / timing)
   // =========================================================
-  isOfferingLocked(s: ViewStateDto): boolean {
-    const seg = s.english.segments.find(x => /offering/i.test(x.name));
-    if (!seg) return false;
-    return !!seg.completed || (seg.actualSec ?? 0) > 0;
+  // isOfferingLocked(s: ViewStateDto): boolean {
+  //   const seg = s.english.segments.find(x => /offering/i.test(x.name));
+  //   if (!seg) return false;
+  //   return !!seg.completed || (seg.actualSec ?? 0) > 0;
+  // }
+
+  isOfferingLocked(s: ViewStateDto | null): boolean {
+    if (!s) return true;
+    // Lock if backend already marked it started
+    if (s.english?.offeringStartedAtSec != null) return true;
+
+    // (Keep your legacy fallback based on the “Offering” segment)
+    const seg = s.english?.segments.find(x => /offering/i.test(x.name));
+    return !!seg && (!!seg.completed || (seg.actualSec ?? 0) > 0);
   }
+
 
   isActive(idx: number, segs: ViewStateDto['english']['segments']): boolean {
     if (!this.state?.masterStartAtUtc) return false;
