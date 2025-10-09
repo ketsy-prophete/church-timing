@@ -12,3 +12,10 @@ export interface RundownDoc {
   serviceStartSec: number;
   segments: RundownSegment[];
 }
+export interface SegmentUpsertDto {
+  id?: string | null;   // send null/'' for new rows
+  order: number;
+  name: string;
+  plannedSec: number;
+}
+

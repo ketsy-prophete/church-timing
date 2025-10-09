@@ -5,6 +5,7 @@ import * as signalR from '@microsoft/signalr';
 
 import { environment } from '../../environments/environment';
 import { RundownDoc, RundownSegment } from '../models/rundown.models';
+import { SegmentUpsertDto } from '../models/rundown.models'; 
 
 
 @Injectable({ providedIn: 'root' })
@@ -184,13 +185,13 @@ export class RundownService {
         // No local mutation needed; server will broadcast StateUpdated.
     }
 
-    postEnglishSegments(runId: string, segs: any[]) {
-        return firstValueFrom(
-            this.http.post(
-                `${environment.apiBaseUrl}/api/runs/${runId}/english/segments`, segs, {
-                headers: { 'Content-Type': 'application/json' }
-            })
-        );
+    postEnglishSegments(runId: string, segs: SegmentUpsertDto[]) {
+        const url = `${this.api}/api/runs/${runId}/english/segments`; 
+        return firstValueFrom(this.http.post(url, segs, {
+            headers: { 'Content-Type': 'application/json' },
+            withCredentials: true
+        }));
     }
+
 }
 
