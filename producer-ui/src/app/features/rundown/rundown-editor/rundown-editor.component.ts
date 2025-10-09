@@ -5,6 +5,8 @@ import { ActivatedRoute } from '@angular/router';
 import { debounceTime } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { TrackByFunction } from '@angular/core';
+import { SignalrService } from '../../../core/services/signalr';
+
 
 
 import { TimePipe } from '../../../shared/time.pipe';
@@ -37,10 +39,12 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
   totalSec = 0;
   overlapWarnings: string[] = [];
   private nextId = 1;
+  private runId!: string;
 
   constructor(private fb: FormBuilder,
     private route: ActivatedRoute,
     private rundown: RundownService,
+    private hub: SignalrService,
     private destroyRef: DestroyRef,
   ) {
     this.form = this.fb.group({
@@ -57,8 +61,8 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
 
   async ngOnInit(): Promise<void> {
     this.runId = this.route.snapshot.paramMap.get('runId') ?? this.route.snapshot.paramMap.get('id')!;
-    await this.rundown.init(this.runId);
-
+    await this.hub.connect(this.runId);   // join group + hydrate state
+    await this.rundown.init(this.runId);  // keep your existing editor store flow
 
     // 1) React to store document changes
     this.rundown.doc$
@@ -118,6 +122,7 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.rundown.dispose();
+    this.hub.disconnect();
   }
 
   private segmentGroup(s: Partial<RundownSegment> = {}) {
@@ -235,7 +240,6 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
   exportPretty(): string { return this.rundown.exportPretty(); }
 
   private recalc() { this.totalSec = this.rundown.totalSec(); this.overlapWarnings = this.rundown.overlaps(); }
-  private runId!: string;
 
   copyJson() {
     const text = this.exportPretty();
