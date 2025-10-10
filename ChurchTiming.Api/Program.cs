@@ -2,6 +2,10 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using ChurchTiming.Api.Contracts;
 using ChurchTiming.Api.Data;
+using Microsoft.AspNetCore.Mvc;
+
+
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -33,11 +37,6 @@ app.UseRouting();
 // 2) Middleware
 app.UseCors(CorsPolicy);
 
-//REMOVE // Controllers + Hub both require the same policy
-// app.MapControllers().RequireCors(CorsPolicy);
-
-//REMOVE // 3) Hub
-// app.MapHub<ServiceSyncHub>("/hubs/serviceSync").RequireCors(CorsPolicy);
 
 static int SinceMasterStartSec(Run run) =>
     (int)Math.Round((DateTime.UtcNow - run.MasterStartAtUtc!.Value).TotalSeconds);
@@ -46,16 +45,20 @@ static int SinceMasterStartSec(Run run) =>
 static object BuildState(Run run) => new
 {
     runId = run.Id,
-    serverTimeUtc = DateTime.UtcNow.ToUniversalTime(),
-    masterStartAtUtc = run.MasterStartAtUtc,
+    serverTimeUtc = DateTime.UtcNow.ToUniversalTime().ToString("o"),
+    masterStartAtUtc = run.MasterStartAtUtc.HasValue
+    ? run.MasterStartAtUtc.Value.ToUniversalTime().ToString("o")
+    : null,
     preteachSec = run.PreteachSec,
     walkBufferSec = run.WalkBufferSec,
     baseOfferingSec = run.BaseOfferingSec,
     spanish = new
     {
+        sermonEndEtaSec = run.SpanishSermonEndEtaSec,
+        etaUpdatedAtUtc = run.SpanishEtaUpdatedAtUtc?.ToUniversalTime().ToString("o"),
         sermonEndedAtSec = run.SpanishSermonEndedAtSec,
-        sermonEndEtaSec = run.SpanishSermonEndEtaSec
     },
+
     english = new
     {
         segments = run.Segments
@@ -95,14 +98,23 @@ app.MapPost("/api/runs", async (RunCreateDto dto, AppDbContext db) =>
     return Results.Ok(new { runId = run.Id });
 });
 
-// START a run
-app.MapPost("/api/runs/{id:guid}/start", async (Guid id, AppDbContext db) =>
+// START a run (broadcast + return state)
+app.MapPost("/api/runs/{id:guid}/start",
+async (Guid id, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
 {
-    var run = await db.Runs.FindAsync(id);
+    var run = await db.Runs
+        .Include(r => r.Segments)
+        .FirstOrDefaultAsync(r => r.Id == id);
     if (run is null) return Results.NotFound();
-    run.MasterStartAtUtc ??= DateTime.UtcNow;
+
+    run.MasterStartAtUtc ??= DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc);
     await db.SaveChangesAsync();
-    return Results.Ok();
+
+    // Build current StateDto (use your existing builder if you have one)
+    var state = BuildState(run);
+
+    await hub.Clients.Group(id.ToString()).StateUpdated(state); // ← push to both devices
+    return Results.Ok(state);
 });
 
 // STATE
@@ -171,16 +183,13 @@ async (Guid id, SegmentUpsertDto[] payload, AppDbContext db, IHubContext<Service
 
     // Remove segments not present in payload, but only if they haven't been completed/timed
     var toRemove = run.Segments
+        .Where(s => s.Id != 0) // exclude newly-added (temporary key) rows
         .Where(s => !seenServerIds.Contains(s.Id))
         .Where(s => payload.All(p => !(int.TryParse(p.Id, out var pid) && pid == s.Id)))
         .Where(s => s.ActualSec is null && !s.Completed)
         .ToList();
 
-    var toDelete = await db.Segments
-    .Where(s => s.RunId == id)
-    .ToListAsync();
-
-    db.RemoveRange(toDelete);
+    db.RemoveRange(toRemove);
 
 
     await db.SaveChangesAsync();
@@ -207,6 +216,14 @@ async (Guid id, int segmentId, AppDbContext db, IHubContext<ServiceSyncHub, ISyn
     {
         seg.Completed = true;
         seg.ActualSec ??= (int)Math.Round((DateTime.UtcNow - run.MasterStartAtUtc.Value).TotalSeconds);
+        // ---- compute DriftSec (duration - planned) ----
+        var prev = run.Segments
+            .Where(s => s.Order < seg.Order && s.Completed && s.ActualSec != null)
+            .OrderByDescending(s => s.Order)
+            .FirstOrDefault();
+        var prevActual = prev?.ActualSec ?? 0;
+        var duration = Math.Max(0, (seg.ActualSec ?? 0) - prevActual);
+        seg.DriftSec = duration - seg.PlannedSec;
         await db.SaveChangesAsync();
         await hub.Clients.Group(id.ToString()).StateUpdated(BuildState(run));
     }
@@ -236,14 +253,27 @@ async (Guid id, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =
 });
 
 // Spanish ETA
-app.MapPost("/api/runs/{id:guid}/spanish/eta", async (Guid id, int etaSec, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
+app.MapPost("/api/runs/{id:guid}/spanish/eta",
+async (Guid id, [FromBody] int etaSec, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
 {
+    if (etaSec < 0) return Results.BadRequest("etaSec must be >= 0");
+
     var run = await db.Runs.FindAsync(id);
     if (run is null) return Results.NotFound();
-    run.SpanishSermonEndEtaSec = etaSec;
+
+    run.SpanishSermonEndEtaSec = etaSec;          // raw value
+    run.SpanishEtaUpdatedAtUtc = DateTime.UtcNow; // timestamp
     await db.SaveChangesAsync();
-    await hub.Clients.Group(id.ToString()).SpanishEtaUpdated(id, etaSec);
-    return Results.Ok();
+
+    // Reload with segments for the broadcast payload
+    var stateRun = await db.Runs
+        .AsNoTracking()
+        .Include(r => r.Segments)
+        .FirstAsync(r => r.Id == id);
+
+    var state = BuildState(stateRun);
+    await hub.Clients.Group(id.ToString()).StateUpdated(state);
+    return Results.Ok(state);
 });
 
 // Spanish Ended
@@ -254,8 +284,10 @@ app.MapPost("/api/runs/{id:guid}/spanish/ended", async (Guid id, int? endedAtSec
     var sec = endedAtSec ?? (int)Math.Round((DateTime.UtcNow - run.MasterStartAtUtc.Value).TotalSeconds);
     run.SpanishSermonEndedAtSec ??= sec;
     await db.SaveChangesAsync();
-    await hub.Clients.Group(id.ToString()).SpanishEnded(id, run.SpanishSermonEndedAtSec.Value);
-    return Results.Ok(new { sermonEndedAtSec = run.SpanishSermonEndedAtSec });
+    var state = await db.Runs.Include(r => r.Segments).Where(r => r.Id == id).Select(r => r).FirstAsync();
+    await hub.Clients.Group(id.ToString()).StateUpdated(BuildState(state));
+    return Results.Ok(BuildState(state));
+
 });
 
 // 4) (V2 backend only) OVERRIDE SPANISH END ---------------------------------

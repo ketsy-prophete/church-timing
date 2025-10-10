@@ -14,4 +14,6 @@ public class Run
     public int? SpanishSermonEndedAtSec { get; set; }
     public int? SpanishSermonEndEtaSec { get; set; }
     public List<RundownSegment> Segments { get; set; } = new();
+    public DateTime? SpanishEtaUpdatedAtUtc { get; set; } // when it was set
+
 }
