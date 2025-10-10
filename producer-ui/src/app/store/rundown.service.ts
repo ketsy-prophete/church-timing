@@ -25,20 +25,6 @@ export class RundownService {
 
     constructor(private http: HttpClient) { }
 
-    async saveToProducer(runId: string, segments: RundownSegment[]): Promise<void> {
-        const url = `${this.api}/api/runs/${runId}/english/segments`;
-
-        const payload = segments.map((s, i) => ({
-            id: s.id != null ? String(s.id) : '',   // new rows can send ''
-            order: i + 1,                           // use current list order
-            name: s.title ?? '',
-            plannedSec: Math.max(0, Math.trunc(s.durationSec ?? 0)),
-            actualSec: null                         // editor doesn't set this
-        }));
-
-        await firstValueFrom(this.http.post<void>(url, payload));
-    }
-
 
     // ---- lifecycle ----
     async init(runId: string) {

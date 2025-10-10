@@ -14,7 +14,7 @@ export interface StateDto {
   preteachSec: number;
   walkBufferSec: number;
   baseOfferingSec: number;
-  spanish: { sermonEndedAtSec?: number; sermonEndEtaSec?: number };
+  spanish: { sermonEndedAtSec?: number; sermonEndEtaSec?: number; etaUpdatedAtUtc?: string };
   english: { segments: SegmentDto[]; runningDriftBeforeOfferingSec: number; offeringStartedAtSec?: number };
   offeringSuggestion: { stretchSec: number; offeringTargetSec: number };
 }
@@ -45,10 +45,12 @@ export class SignalrService {
 
   serverNowMs() { return Date.now() - this.serverOffsetMs; }
 
+
+
   private async refreshState(runId: string) {
     const state = await firstValueFrom(this.http.get<StateDto>(`${this.api}/api/runs/${runId}/state`));
-    this.lastSyncAt = Date.now();
     this.serverOffsetMs = Date.now() - Date.parse(state.serverTimeUtc);
+    this.lastSyncAt = Date.now();
     this.state$.next(state);
   }
 
@@ -56,30 +58,35 @@ export class SignalrService {
   // ==================== START OF Connect =========================//
 
   async connect(runId: string) {
+    const previousRunId = this.currentRunId;
     this.currentRunId = runId;
+
 
     // Build once
     if (!this.hub) {
       this.hub = new signalR.HubConnectionBuilder()
-        .withUrl(environment.hubUrl)
+        .withUrl(environment.hubUrl, { withCredentials: true })
         .withAutomaticReconnect()
         .build();
 
       // If hub goes away, fall back to polling
       this.hub.onreconnecting(() => this.startPolling(this.currentRunId ?? runId));
 
-      await this.hub.start();
+      if (this.hub.state !== signalR.HubConnectionState.Connected) {
+        await this.hub.start();
+      }
 
       const id = this.currentRunId ?? runId;
       if (id) {
         try { await this.hub.invoke('JoinRun', id); } catch (e) { console.error('[Hub] initial JoinRun failed', e); }
-        await this.refreshState(id); // prime the UI right away
+        await this.refreshState(id);   // ← fetch immediately after subscribe
+        this.stopPolling();            // ← prefer push if we’re live
       }
 
       this.hub.on('StateUpdated', (state: StateDto) => {
         this.stopPolling();                              // prefer push when hub is live
-        this.lastSyncAt = Date.now();
         this.serverOffsetMs = Date.now() - Date.parse(state.serverTimeUtc);
+        this.lastSyncAt = Date.now();
         this.state$.next(state);                         // update UI
       });
 
@@ -89,13 +96,8 @@ export class SignalrService {
         this.stopPolling();
         const id = this.currentRunId ?? runId;
         if (!id || !this.hub) return;                 // guard runId & hub
-        try {
-          await this.hub.invoke('JoinRun', id);
-        } catch (e) {
-          console.error('[Hub] JoinRun after reconnect failed', e);
-          return;                                     // bail if join fails
-        }
-        await this.refreshState(id);                  // pulls /state and updates state$
+        try { await this.hub.invoke('JoinRun', id); } catch (e) { console.error('[Hub] re-JoinRun failed', e); return; }
+        await this.refreshState(id);                  // ← fetch right after re-subscribe
       });
 
 
@@ -104,6 +106,14 @@ export class SignalrService {
 
 
       this.hub.onclose(() => this.startPolling(this.currentRunId ?? runId));
+    }
+
+    // If the route runId changed while connected, swap groups cleanly
+    if (previousRunId && previousRunId !== runId && this.hub?.state === signalR.HubConnectionState.Connected) {
+      try { await this.hub.invoke('LeaveRun', previousRunId); } catch { }
+      try { await this.hub.invoke('JoinRun', runId); } catch (e) { console.error('[Hub] subscribe (run change) failed', e); }
+      await this.refreshState(runId);
+      this.stopPolling();
     }
 
     // If a start() is already in-flight, wait for it
@@ -132,6 +142,11 @@ export class SignalrService {
       } finally {
         this.starting = undefined;
       }
+
+      // Once connected, subscribe + refresh to finalize real-time
+      try { await this.hub.invoke('JoinRun', runId); } catch (e) { console.error('[Hub] post-start JoinRun failed', e); }
+      await this.refreshState(runId);
+      this.stopPolling();
     }
   }
   // ==================== END OF Connect =========================//
@@ -141,8 +156,8 @@ export class SignalrService {
   private async syncOnce(runId: string) {
     const url = `${this.api}/api/runs/${runId}/state`;
     const state = await firstValueFrom(this.http.get<StateDto>(url));
-    this.lastSyncAt = Date.now();
     this.serverOffsetMs = Date.now() - Date.parse(state.serverTimeUtc);
+    this.lastSyncAt = Date.now();
     this.state$.next(state);
   }
 
@@ -174,11 +189,12 @@ export class SignalrService {
       catchError(err => { console.warn('[poll] state fetch failed', err); return EMPTY; })
     ).subscribe(s => {
       if (!s) return;
+      this.serverOffsetMs = Date.now() - Date.parse(s.serverTimeUtc); // ← correct sign + uses 's'
       this.lastSyncAt = Date.now();
-      this.serverOffsetMs = Date.now() - Date.parse(s.serverTimeUtc);
       this.state$.next(s);
     });
   }
+
 
   private stopPolling() {
     this.pollSub?.unsubscribe();
@@ -212,22 +228,31 @@ export class SignalrService {
   joinRun(runId: string) { return this.hub ? this.hub.invoke('JoinRun', runId) : Promise.resolve(); }
 
 
-  startRun(runId: string) {
-    return firstValueFrom(this.http.post(`${this.api}/api/runs/${runId}/start`, {}));
+  async startRun(runId: string) {
+    await firstValueFrom(this.http.post(`${this.api}/api/runs/${runId}/start`, {}));
+    try { await this.refreshState(runId); } catch { }
   }
-  sermonEnded(runId: string) {
-    return firstValueFrom(this.http.post(`${this.api}/api/runs/${runId}/spanish/ended`, {}));
+  async sermonEnded(runId: string) {
+    await firstValueFrom(this.http.post(`${this.api}/api/runs/${runId}/spanish/ended`, {}));
+    try { await this.refreshState(runId); } catch { }
   }
-  startOffering(runId: string) {
-    return firstValueFrom(this.http.post(
-      `${this.api}/api/runs/${runId}/english/offering/start`, {}));
+
+  async startOffering(runId: string) {
+    await firstValueFrom(this.http.post(`${this.api}/api/runs/${runId}/english/offering/start`, {}));
+    try { await this.refreshState(runId); } catch { }
   }
-  completeSegment(runId: string, segmentId: string) {
-    return firstValueFrom(this.http.post(`${this.api}/api/runs/${runId}/segments/${segmentId}/complete`, {}));
+
+  async completeSegment(runId: string, segmentId: string) {
+    await firstValueFrom(this.http.post(`${this.api}/api/runs/${runId}/english/segments/${segmentId}/complete`, {}));
+    try { await this.refreshState(runId); } catch { }
   }
-  setSpanishEta(runId: string, etaSec: number) {
-    return firstValueFrom(this.http.post(
-      `${this.api}/api/runs/${runId}/spanish/eta?etaSec=${etaSec}`, {}));
+  async setSpanishEta(runId: string, etaSec: number) {
+    await firstValueFrom(
+      this.http.post(`${this.api}/api/runs/${runId}/spanish/eta`, etaSec, {
+        headers: { 'Content-Type': 'application/json' }
+      })
+    );
+    try { await this.refreshState(runId); } catch { }
   }
 
   createRun(dto: CreateRunDto) {

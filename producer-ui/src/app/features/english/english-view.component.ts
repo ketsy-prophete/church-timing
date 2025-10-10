@@ -2,7 +2,7 @@ import { Component, OnInit, OnDestroy, ViewChild, ElementRef, TrackByFunction, i
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
-import { Observable, Subscription, combineLatest, interval, timer } from 'rxjs';
+import { Observable, Subscription, combineLatest, interval, timer, BehaviorSubject } from 'rxjs';
 import { map, startWith, auditTime } from 'rxjs/operators';
 
 import { SignalrService } from '../../core/services/signalr';
@@ -10,6 +10,7 @@ import type { StateDto as BaseStateDto } from '../../core/services/signalr';
 import { TimePipe } from '../../shared/time.pipe';
 import { SignedTimePipe } from '../../shared/signed-time.pipe';
 import { RundownService } from '../../store/rundown.service';
+import { secondsRemaining } from '../../shared/time-helpers'; // ✅ added
 
 // ---------- Local types ----------
 type ViewStateDto = BaseStateDto & {
@@ -18,9 +19,9 @@ type ViewStateDto = BaseStateDto & {
 
 interface EtaToast {
   id: number;
-  remSec: number;          // countdown snapshot (e.g., 5:00 -> 300)
-  wall: Date;              // timestamp for display
-  deltaFromTarget: number; // neg = early, pos = late vs 36:00
+  remSec: number;
+  wall: Date;
+  deltaFromTarget: number;
 }
 
 @Component({
@@ -30,8 +31,16 @@ interface EtaToast {
   templateUrl: './english-view.component.html',
   styleUrls: ['./english-view.component.css'],
 })
-
 export class EnglishViewComponent implements OnInit, OnDestroy {
+
+  // // Master countdown we control locally
+  // private masterCountdownLocal$ = new BehaviorSubject<number>(0);
+  // private tickHandle?: any;
+  // private lastMasterStart: string | null = null;
+
+  // Spanish live ETA countdown
+  spanishRemainingSec: number | null = null;
+  private spanishTimerId?: any;
 
   // ---------- DI ----------
   private route = inject(ActivatedRoute);
@@ -44,17 +53,15 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
   runId!: string;
   connected = false;
   connectErr: unknown = null;
-showMiniRundown = false;
+  showMiniRundown = false;
 
-  // ---------- Reactive state exposed to template ----------
+  // ---------- Reactive state ----------
   state$ = this.hub.state$;
   isLive$ = this.hub.isLive$;
   lastSyncAgo$ = this.hub.lastSyncAgo$;
   masterCountdown$ = this.hub.masterCountdown$;
-  
 
   state: ViewStateDto | null = null;
-
   vm$!: Observable<{ mc: number; s: ViewStateDto | null }>;
   vmView$!: Observable<{ mc: number; s: ViewStateDto | null }>;
 
@@ -70,18 +77,13 @@ showMiniRundown = false;
   trackBySeg: TrackByFunction<ViewStateDto['english']['segments'][number]> = (_i, s) => s.id;
   get doc$() { return this.rundownService.doc$; }
 
-  // ----- SHIMS for current template -----
-
-  // Used by multiple *ngFor (segments, etaToasts, sermonEndToasts, doc.segments)
+  // Used by *ngFor
   public trackById: TrackByFunction<any> = (_: number, row: any) => row?.id ?? _;
   trackBySegWrap = (_: number, row: { seg: { id: string } }) => row.seg.id;
 
-
-  // Template calls (click)="complete(seg.id)"
   public complete(id: string) {
     if (this.runId) this.hub.completeSegment(this.runId, id);
   }
-
 
   // ---------- Toasts ----------
   etaToasts: EtaToast[] = [];
@@ -137,33 +139,26 @@ showMiniRundown = false;
         this.connected = true;
       } catch (e) {
         console.error('[EnglishView] connect failed', e);
-        // (optional) set a field like this.connectErr = e;
       }
-
     });
 
-    // If you still want a "latest" fallback, add a getLatestRunId() helper to RundownService and re-enable.
-    // For now, require a concrete :runId in the route.
-    // ===============================================================
-    // Fallback to latest run when no id or "latest"
-    // ===============================================================
-    // this.store.getLatestRunId().subscribe(async ({ runId }) => {
-    //   if (!runId) return;
-    //   if (this.connected && runId === this.runId) return;
-    //   this.runId = runId;
-    //   try { await this.hub.connect(runId); this.connected = true; }
-    //   catch (e) { this.connectErr = e; console.error('[EnglishView] connect failed', e); }
-    // });
-
-
-
-    // reflect hub state locally + drive toasts/highlights
     this.subState = this.hub.state$.subscribe((s) => {
       this.state = s as ViewStateDto | null;
       if (!s) return;
 
-      this.updateHighlight(s as ViewStateDto);
+      // // master start logic
+      // const cur = s.masterStartAtUtc ?? null;
+      // if (cur && this.lastMasterStart !== cur) {
+      //   this.startTicker(cur);
+      // } else if (!cur && this.lastMasterStart) {
+      //   this.stopTicker();
+      //   this.masterCountdownLocal$.next(0);
+      // }
+      // this.lastMasterStart = cur;
 
+      // this.updateHighlight(s as ViewStateDto);
+
+      // Toast triggers
       const eta = (s as ViewStateDto).spanish?.sermonEndEtaSec;
       if (typeof eta === 'number') this.onEtaUpdated(eta);
 
@@ -172,53 +167,80 @@ showMiniRundown = false;
         this.lastSermonEndSec = end;
         this.pushSermonEndedToast();
       }
+
+      // ✅ Update Spanish ETA countdown live
+      this.updateSpanishCountdown(s);
+      this.ensureSpanishTicker(s);
     });
 
-    // build a small view model for template convenience
+    //   this.vm$ = combineLatest([
+    //     this.masterCountdownLocal$.pipe(startWith(0)),
+    //     this.hub.state$.pipe(startWith(this.state)),
+    //   ]).pipe(map(([mc, s]) => ({ mc, s: s as ViewStateDto | null })));
+
+    //   this.vmView$ = this.vm$.pipe(auditTime(0));
+    // --- replace the whole vm$/vmView$ block in ngOnInit() ---
     this.vm$ = combineLatest([
-      this.hub.masterCountdown$.pipe(startWith(null as number | null)),
-      this.hub.state$.pipe(startWith(this.state)),
-    ]).pipe(map(([mc, s]) => ({ mc: mc ?? 0, s: s as ViewStateDto | null })));
+      this.hub.masterCountdown$.pipe(startWith<number | null>(null)),
+      this.hub.state$.pipe(startWith<ViewStateDto | null>(null)),
+    ]).pipe(
+      map(([mc, s]) => ({ mc: mc ?? 0, s }))
+    );
 
     this.vmView$ = this.vm$.pipe(auditTime(0));
+
   }
 
   ngOnDestroy() {
+    // this.stopTicker();
+    this.stopSpanishTicker();
     this.subRoute?.unsubscribe();
     this.subState?.unsubscribe();
     this.hub.disconnect();
-    this.rundownService.dispose();   // <— clean up the rundown hub/subscriptions
+    this.rundownService.dispose();
   }
 
   // =========================================================
-  // Actions (UI handlers)
+  // Spanish ETA countdown
+  // =========================================================
+  private updateSpanishCountdown(s: ViewStateDto | null) {
+    if (!s) { this.spanishRemainingSec = null; return; }
+    const eta = s.spanish?.sermonEndEtaSec ?? null;
+    const updated = s.spanish?.etaUpdatedAtUtc ?? null;
+    const offset = (this.hub as any)['serverOffsetMs'] ?? 0;
+    this.spanishRemainingSec = secondsRemaining(eta, updated, offset);
+  }
+
+  private ensureSpanishTicker(s: ViewStateDto | null) {
+    if (this.spanishTimerId) { clearInterval(this.spanishTimerId); this.spanishTimerId = undefined; }
+    if (!s?.spanish?.sermonEndEtaSec || !s.spanish.etaUpdatedAtUtc) return;
+    this.spanishTimerId = setInterval(() => this.updateSpanishCountdown(this.hub.state$.value), 500);
+  }
+
+  private stopSpanishTicker() {
+    if (this.spanishTimerId) {
+      clearInterval(this.spanishTimerId);
+      this.spanishTimerId = undefined;
+    }
+  }
+
+  // =========================================================
+  // Actions
   // =========================================================
   startRun() { if (this.runId) this.hub.startRun(this.runId); }
 
   sermonEnded() { if (this.runId) this.hub.sermonEnded(this.runId); }
 
-  // async startOffering() {
-  //   if (!this.runId || this.offeringClicked) return;
-  //   this.offeringClicked = true;
-  //   try {
-  //     await this.rundownService.startOffering(this.runId);
-  //   } finally {
-  //     this.offeringClicked = false; // optional: reset if you want re-click ability
-  //   }
-  // }
-
   async startOffering() {
     const s = this.hub.state$.value as ViewStateDto | null;
     if (!this.runId || this.isOfferingLocked(s) || this.offeringClicked) return;
-
     this.offeringClicked = true;
     try {
       await this.rundownService.startOffering(this.runId);
     } finally {
-      this.offeringClicked = false;  // optional: reset if you want re-click ability
+      this.offeringClicked = false;
     }
   }
-
 
   completeSegment(segId: string) { if (this.runId) this.hub.completeSegment(this.runId, segId); }
 
@@ -227,60 +249,19 @@ showMiniRundown = false;
     const val = typeof delta === 'number' ? Math.max(0, cur + delta) : cur;
     this.etaForm.patchValue({ etaSec: val });
   }
+
   submitEta() {
     const v = this.etaForm.value.etaSec ?? 0;
     if (this.runId) this.hub.setSpanishEta(this.runId, v);
   }
+
   clearEta() {
     if (this.runId) this.hub.setSpanishEta(this.runId, 0);
     this.etaForm.reset();
   }
 
   // =========================================================
-  // View helpers (segments / timing)
-  // =========================================================
-  // isOfferingLocked(s: ViewStateDto): boolean {
-  //   const seg = s.english.segments.find(x => /offering/i.test(x.name));
-  //   if (!seg) return false;
-  //   return !!seg.completed || (seg.actualSec ?? 0) > 0;
-  // }
-
-  isOfferingLocked(s: ViewStateDto | null): boolean {
-    if (!s) return true;
-    // Lock if backend already marked it started
-    if (s.english?.offeringStartedAtSec != null) return true;
-
-    // (Keep your legacy fallback based on the “Offering” segment)
-    const seg = s.english?.segments.find(x => /offering/i.test(x.name));
-    return !!seg && (!!seg.completed || (seg.actualSec ?? 0) > 0);
-  }
-
-
-  isActive(idx: number, segs: ViewStateDto['english']['segments']): boolean {
-    if (!this.state?.masterStartAtUtc) return false;
-    for (let i = 0; i < idx; i++) if (!segs[i].completed) return false;
-    return !segs[idx].completed;
-  }
-
-  activeElapsedSec(idx: number, segs: ViewStateDto['english']['segments']): number {
-    let sumActualBefore = 0;
-    for (let i = 0; i < idx; i++) sumActualBefore += (segs[i].actualSec ?? 0);
-    const masterStartMs = Date.parse(this.state!.masterStartAtUtc!);
-    const segStartMs = masterStartMs + sumActualBefore * 1000;
-    const nowMs = this.hub.serverNowMs();
-    return Math.max(0, Math.floor((nowMs - segStartMs) / 1000));
-  }
-
-  endedAt(idx: number, segs: ViewStateDto['english']['segments']): Date | null {
-    if (!this.state?.masterStartAtUtc || !segs[idx]?.completed) return null;
-    let total = 0;
-    for (let i = 0; i <= idx; i++) total += (segs[i].actualSec ?? 0);
-    const endMs = Date.parse(this.state.masterStartAtUtc) + total * 1000;
-    return new Date(endMs);
-  }
-
-  // =========================================================
-  // Drift / ETA helpers
+  // View helpers / timing / toasts
   // =========================================================
   private updateHighlight(s: ViewStateDto | null) {
     if (!s) return;
@@ -292,7 +273,6 @@ showMiniRundown = false;
       newlyCompleted.sort((a, b) => a.order - b.order);
       this.lastCompletedId = newlyCompleted[newlyCompleted.length - 1].id;
     }
-
     this.prevCompletedIds = completedIds;
   }
 
@@ -308,7 +288,7 @@ showMiniRundown = false;
     const eta = s.spanish?.sermonEndEtaSec;
     if (typeof ended === 'number' && ended > 0) return ended;
     if (typeof eta === 'number' && eta > 0) return eta;
-    return this.hub.masterTargetSec; // 36:00 fallback
+    return this.hub.masterTargetSec;
   }
 
   predictedOfferingLengthSec(s: ViewStateDto): number | null {
@@ -322,21 +302,6 @@ showMiniRundown = false;
     return Math.max(base, gap);
   }
 
-  predictedLengthSec(s: ViewStateDto): number {
-    const base = +(s.baseOfferingSec ?? 0);
-    const plannedStart = this.plannedOfferingStartSec(s);
-    if (plannedStart == null) return base;
-    const drift = +(s.english.runningDriftBeforeOfferingSec ?? 0);
-    const start = plannedStart + drift;
-    const gap = Math.max(0, this.spanishAnchorOrPlannedSec(s) - start);
-    return Math.max(base, gap);
-  }
-
-  predictedExtensionSec(s: ViewStateDto): number {
-    const ext = this.predictedLengthSec(s) - +(s.baseOfferingSec ?? 0);
-    return Math.max(0, ext);
-  }
-
   private plannedOfferingStartSec(s: ViewStateDto): number | null {
     const idx = s.english.segments.findIndex(x => /offering/i.test(x.name));
     if (idx < 0) return null;
@@ -345,28 +310,21 @@ showMiniRundown = false;
     return total;
   }
 
-  // =========================================================
-  // Toasts
-  // =========================================================
   private async onEtaUpdated(newEtaAbsSec: number) {
     if (!(newEtaAbsSec > 0)) return;
     if (this.lastEtaAbsSec != null && newEtaAbsSec === this.lastEtaAbsSec) return;
-
     const now = Date.now();
-    if (now - this.lastToastAt < 800) return; // rate-limit duplicate bursts
+    if (now - this.lastToastAt < 800) return;
     this.lastToastAt = now;
-
     this.lastEtaAbsSec = newEtaAbsSec;
 
     const nowElapsed = this.masterElapsedSec() ?? 0;
     const remSec = Math.max(0, Math.floor(newEtaAbsSec - nowElapsed));
     const deltaFromTarget = newEtaAbsSec - this.hub.masterTargetSec;
-
     const id = this.toastIdSeq++;
     const wall = new Date(this.hub.serverNowMs());
     this.etaToasts = [...this.etaToasts, { id, remSec, wall, deltaFromTarget }];
-
-    try { await this.etaChime?.nativeElement.play(); } catch { /* no-op */ }
+    try { await this.etaChime?.nativeElement.play(); } catch { }
   }
 
   private pushSermonEndedToast() {
@@ -375,37 +333,8 @@ showMiniRundown = false;
     this.sermonEndToasts = [...this.sermonEndToasts, { id, wall: wall ?? null }];
   }
 
-  closeEtaToast(id: number) {
-    this.etaToasts = this.etaToasts.filter(t => t.id !== id);
-  }
-
-  closeSermonEndToast(id: number) {
-    this.sermonEndToasts = this.sermonEndToasts.filter(t => t.id !== id);
-  }
-
-  spanishEtaSec(s: ViewStateDto | null): number | null {
-    const manual = s?.spanish?.sermonEndEtaSec;
-    return manual ?? null;
-  }
-
-  etaColor(etaSec: number): string {
-    if (etaSec > this.hub.masterTargetSec) return '#dc2626';  // red = late
-    if (etaSec < this.hub.masterTargetSec) return '#16a34a';  // green = early
-    return 'inherit';
-  }
-
-  etaDeltaFromTarget(etaSec: number): number {
-    return etaSec - this.hub.masterTargetSec;
-  }
-
-  spanishTimeLeftSec(): number | null {
-    const ended = this.state?.spanish?.sermonEndedAtSec;
-    if (ended != null && ended > 0) return 0;
-    const etaAbs = this.state?.spanish?.sermonEndEtaSec;
-    const now = this.masterElapsedSec();
-    if (etaAbs == null || now == null) return null;
-    return Math.max(0, etaAbs - now);
-  }
+  closeEtaToast(id: number) { this.etaToasts = this.etaToasts.filter(t => t.id !== id); }
+  closeSermonEndToast(id: number) { this.sermonEndToasts = this.sermonEndToasts.filter(t => t.id !== id); }
 
   spanishEndedAtWallTime(): Date | null {
     const endSec = this.state?.spanish?.sermonEndedAtSec;
@@ -418,6 +347,83 @@ showMiniRundown = false;
 
   totalDurationSec(doc: { segments?: Array<{ durationSec?: number }> } | null | undefined): number {
     return (doc?.segments ?? []).reduce((sum, s) => sum + (s?.durationSec ?? 0), 0);
+  }
+
+  // private startTicker(masterStartIso: string) {
+  //   this.stopTicker();
+  //   const masterStartMs = Date.parse(masterStartIso);
+  //   this.tickHandle = setInterval(() => {
+  //     const nowMs = this.hub.serverNowMs();
+  //     const elapsedSec = Math.max(0, Math.floor((nowMs - masterStartMs) / 1000));
+  //     const remaining = Math.max(0, this.hub.masterTargetSec - elapsedSec);
+  //     this.masterCountdownLocal$.next(remaining);
+  //   }, 250);
+  // }
+
+  // private stopTicker() {
+  //   if (this.tickHandle) {
+  //     clearInterval(this.tickHandle);
+  //     this.tickHandle = undefined;
+  //   }
+  // }
+
+  isOfferingLocked(s: ViewStateDto | null): boolean {
+    if (!s) return true;
+    if (s.english?.offeringStartedAtSec != null) return true;
+    const seg = s.english?.segments.find(x => /offering/i.test(x.name));
+    return !!seg && (!!seg.completed || (seg.actualSec ?? 0) > 0);
+  }
+
+  // ----------------------------------------------------------
+  // Template helpers restored
+  // ----------------------------------------------------------
+
+  // Spanish ETA value helper
+  spanishEtaSec(s: any): number | null {
+    return s?.spanish?.sermonEndEtaSec ?? null;
+  }
+
+  // Offering prediction helpers
+  predictedLengthSec(s: any): number | null {
+    const base = s?.baseOfferingSec ?? 0;
+    const plannedStart = this.plannedOfferingStartSec(s);
+    if (plannedStart == null) return base;
+    const drift = s?.english?.runningDriftBeforeOfferingSec ?? 0;
+    const start = plannedStart + drift;
+    const anchor = this.spanishAnchorOrPlannedSec(s);
+    const gap = Math.max(0, anchor - start);
+    return Math.max(base, gap);
+  }
+
+  predictedExtensionSec(s: any): number {
+    const ext = this.predictedLengthSec(s)! - (s?.baseOfferingSec ?? 0);
+    return Math.max(0, ext);
+  }
+
+  // Segment runtime helpers
+  isActive(idx: number, segs: any[]): boolean {
+    if (!this.state?.masterStartAtUtc) return false;
+    for (let i = 0; i < idx; i++) if (!segs[i].completed) return false;
+    return !segs[idx].completed;
+  }
+
+  activeElapsedSec(idx: number, segs: any[]): number {
+    let prevActual = 0;
+    for (let i = idx - 1; i >= 0; i--) {
+      const a = segs[i].actualSec;
+      if (segs[i].completed && typeof a === 'number') { prevActual = a; break; }
+    }
+    const masterStartMs = Date.parse(this.state!.masterStartAtUtc!);
+    const segStartMs = masterStartMs + prevActual * 1000;
+    const nowMs = this.hub.serverNowMs();
+    return Math.max(0, Math.floor((nowMs - segStartMs) / 1000));
+  }
+
+  endedAt(idx: number, segs: any[]): Date | null {
+    if (!this.state?.masterStartAtUtc || !segs[idx]?.completed) return null;
+    const endSec = segs[idx].actualSec ?? 0;
+    const endMs = Date.parse(this.state.masterStartAtUtc) + endSec * 1000;
+    return new Date(endMs);
   }
 
 }

@@ -15,7 +15,9 @@
       <button type="button" (click)="addSegment()">Add segment</button>
       <button type="button" (click)="clearAll()">Clear</button>
 
-      <button type="button" (click)="saveToProducer()" [disabled]="saving || !runId">Save to Producer</button>
+      <button type="button" (click)="saveToProducer()" [disabled]="saving || !runId || !segmentsArray.length">
+        {{ saving ? 'Saving…' : 'Save to Producer' }}
+      </button>
 
 
       <!-- Hidden in v1 -->
@@ -39,7 +41,7 @@
         <div>End</div>
         <div>Actions</div>
       </div>
-      
+
 
       <div class="row" *ngFor="let g of segmentsArray.controls; let i = index; trackBy: trackBySegment" [formGroup]="g"
         [style.--stripe]="g.value.color || '#5b9'">

@@ -6,6 +6,8 @@ import { debounceTime } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { TrackByFunction } from '@angular/core';
 import { SignalrService } from '../../../core/services/signalr';
+import type { SegmentUpsertDto } from '../../../models/rundown.models';
+
 
 
 
@@ -13,7 +15,6 @@ import { TimePipe } from '../../../shared/time.pipe';
 import { SignedTimePipe } from '../../../shared/signed-time.pipe';
 import { RundownSegment } from '../../../models/rundown.models';
 import { RundownService } from '../../../store/rundown.service';
-
 
 
 type RundownRow = {
@@ -70,7 +71,6 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(doc => {
         this.isPatching = true;
-
 
         const fa = this.segmentsArray;
         const storeSegs = doc.segments ?? [];
@@ -279,12 +279,11 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
     if (!this.runId || this.saving) return;
 
     // Map your form rows → API SegmentDto
-    const payload = this.segmentsArray.controls.map((fg, i) => ({
-      id: "",                                     // force DB to generate new ids
-      order: i + 1,                               // or use a dedicated order control if you have one
-      name: (fg.controls.title.value ?? '').trim(),
-      plannedSec: fg.controls.durationSec.value ?? 0,
-      actualSec: null
+    const payload: SegmentUpsertDto[] = this.segmentsArray.controls.map((fg, i) => ({
+      id: null, // let server assign
+      order: i + 1,
+      name: ((fg.controls.title.value ?? '').trim() || 'Untitled'),
+      plannedSec: Number(fg.controls.durationSec.value) || 0,
     }));
 
     this.saving = true;

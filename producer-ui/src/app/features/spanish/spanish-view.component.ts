@@ -1,14 +1,17 @@
 import { Component, OnInit, OnDestroy, inject, TrackByFunction } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
-import { Observable, Subscription, interval, map, startWith, combineLatest } from 'rxjs';
-
+import {
+  Observable, Subscription, interval, map, startWith, combineLatest
+} from 'rxjs';
+import { FormControl, ReactiveFormsModule } from '@angular/forms';       // ✅ added
 import { TimePipe } from '../../shared/time.pipe';
 import { SignedTimePipe } from '../../shared/signed-time.pipe';
 import { SignalrService } from '../../core/services/signalr';
 import type { StateDto as BaseStateDto } from '../../core/services/signalr';
 import { RundownService } from '../../store/rundown.service';
 import { RundownSegment } from '../../models/rundown.models';
+import { secondsRemaining } from '../../shared/time-helpers';            // ✅ added
 
 type StateDto = BaseStateDto & {
   spanish: BaseStateDto['spanish'] & { sermonEndEtaSec?: number };
@@ -28,7 +31,7 @@ type EnglishSeg = {
 @Component({
   standalone: true,
   selector: 'app-spanish-view',
-  imports: [CommonModule, TimePipe, SignedTimePipe],
+  imports: [CommonModule, TimePipe, SignedTimePipe, ReactiveFormsModule], // ✅ added ReactiveFormsModule
   templateUrl: './spanish-view.component.html',
   styleUrls: ['./spanish-view.component.css'],
 })
@@ -40,6 +43,11 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
   private subRoute?: Subscription;
   private subState?: Subscription;
   runId!: string;
+  timeLeftSec = new FormControl<number | null>(null);                    // ✅ now resolves
+
+  remainingSec: number | null = null;
+  private timerId?: any;
+  private currentRunId?: string;
 
   // Streams
   doc$ = this.rundown.doc$;
@@ -48,7 +56,6 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
   // UI state
   sermonEndClicked = false;
   showMiniRundown = false;
-
 
   // Trackers / highlights
   private prevCompletedIds = new Set<string>();
@@ -59,11 +66,13 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
   trackBySegWrap = (_: number, row: { seg: { id: string } }) => row.seg.id;
   trackBySeg = (index: number, seg: { id?: string } | null | undefined) => seg?.id ?? index;
 
+  constructor(private sync: SignalrService) { }
+
   // ---------- Lifecycle ----------
   async ngOnInit() {
     this.state = this.hub.state$.value;
 
-    this.subRoute = this.route.paramMap.subscribe(async pm => {
+    this.subRoute = this.route.paramMap.subscribe(async (pm) => {
       const id = pm.get('runId') ?? pm.get('id');
       if (!id || id === this.runId) return;
       this.runId = id;
@@ -73,12 +82,18 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
 
     this.vm$ = combineLatest([
       this.hub.masterCountdown$.pipe(startWith(null as number | null)),
-      this.hub.state$.pipe(startWith(this.state))
+      this.hub.state$.pipe(startWith(this.state)),
     ]).pipe(map(([mc, s]) => ({ mc: mc ?? 0, s })));
 
-    this.subState = this.hub.state$.subscribe(s => {
+    this.subState = this.hub.state$.subscribe((s) => {
       this.state = s as StateDto | null;
       this.updateHighlight(this.state);
+    });
+
+    // subscribe to state updates for live ETA countdown
+    this.sync.state$.subscribe((s) => {
+      this.updateRemaining(s);
+      this.ensureTicker(s);
     });
   }
 
@@ -87,6 +102,29 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
     this.subState?.unsubscribe();
     this.hub.disconnect();
     this.rundown.dispose();
+    if (this.timerId) clearInterval(this.timerId);
+  }
+
+  // operator clicks “Send”
+  async sendEta() {
+    const runId = this.runId;                                           // ✅ use existing runId
+    const eta = this.timeLeftSec.value;
+    if (!runId || eta == null || eta < 0) return;
+    await this.sync.setSpanishEta(runId, eta);
+  }
+
+  private updateRemaining(s: StateDto | null) {
+    if (!s) { this.remainingSec = null; return; }
+    const eta = s.spanish?.sermonEndEtaSec ?? null;
+    const updated = s.spanish?.etaUpdatedAtUtc ?? null;
+    const offset = (this.sync as any)['serverOffsetMs'] ?? 0;
+    this.remainingSec = secondsRemaining(eta, updated, offset);
+  }
+
+  private ensureTicker(s: StateDto | null) {
+    if (this.timerId) { clearInterval(this.timerId); this.timerId = undefined; }
+    if (!s?.spanish?.sermonEndEtaSec || !s.spanish.etaUpdatedAtUtc) return;
+    this.timerId = setInterval(() => this.updateRemaining(this.sync.state$.value), 500);
   }
 
   // ---------- Actions ----------
@@ -124,7 +162,7 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
     )
   );
 
-  // ---------- ETA ----------
+  // ---------- Remaining helper & other methods ----------
   private parseMmSs(txt: string): number | null {
     const m = /^(\d{1,3}):([0-5]\d)$/.exec(txt.trim());
     if (!m) return null;
@@ -164,11 +202,11 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
   get completedEnglishWithRunning() {
     let sum = 0;
     const list = ((this.state?.english?.segments ?? []) as unknown as EnglishSeg[])
-      .filter(s => !!s.completed)
+      .filter((s) => !!s.completed)
       .slice()
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-    return list.map(seg => {
+    return list.map((seg) => {
       const drift = +(seg.driftSec ?? 0);
       sum += drift;
       return { seg, running: sum };
@@ -177,16 +215,16 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
 
   get completedEnglishSorted(): EnglishSeg[] {
     return ((this.state?.english?.segments ?? []) as unknown as EnglishSeg[])
-      .filter(s => !!s.completed)
+      .filter((s) => !!s.completed)
       .slice()
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   }
 
   private updateHighlight(s: StateDto | null) {
     if (!s?.english?.segments) return;
-    const completed = (s.english.segments as unknown as EnglishSeg[]).filter(x => x.completed);
-    const completedIds = new Set(completed.map(x => x.id));
-    const newlyCompleted = completed.filter(x => !this.prevCompletedIds.has(x.id));
+    const completed = (s.english.segments as unknown as EnglishSeg[]).filter((x) => x.completed);
+    const completedIds = new Set(completed.map((x) => x.id));
+    const newlyCompleted = completed.filter((x) => !this.prevCompletedIds.has(x.id));
 
     if (newlyCompleted.length > 0) {
       newlyCompleted.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -197,13 +235,10 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
 
   endedAtFor(segId: string, segs: EnglishSeg[]): Date | null {
     if (!this.state?.masterStartAtUtc) return null;
-    let total = 0;
-    for (const s of [...segs].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
-      total += (s.actualSec ?? 0);
-      if (s.id === segId && s.completed) {
-        const endMs = Date.parse(this.state.masterStartAtUtc) + total * 1000;
-        return new Date(endMs);
-      }
+    const seg = segs.find((s) => s.id === segId);
+    if (seg?.completed && typeof seg.actualSec === 'number') {
+      const endMs = Date.parse(this.state.masterStartAtUtc) + seg.actualSec * 1000;
+      return new Date(endMs);
     }
     return null;
   }
@@ -227,7 +262,7 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
     return new Date(startMs + endSec * 1000);
   }
 
-  // ---------- RundownDoc helpers (editor/planned rundown) ----------
+  // ---------- RundownDoc helpers ----------
   totalDurationSec(doc: { segments?: Array<{ durationSec?: number }> } | null | undefined): number {
     return (doc?.segments ?? []).reduce((sum, s) => sum + (s?.durationSec ?? 0), 0);
   }
