@@ -37,50 +37,57 @@ app.UseRouting();
 // 2) Middleware
 app.UseCors(CorsPolicy);
 
+static DateTime AsUtc(DateTime dt) =>
+    dt.Kind switch
+    {
+        DateTimeKind.Utc => dt,
+        DateTimeKind.Local => dt.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(dt, DateTimeKind.Utc) // Unspecified -> treat as UTC (no shift)
+    };
 
 static int SinceMasterStartSec(Run run) =>
-    (int)Math.Round((DateTime.UtcNow - run.MasterStartAtUtc!.Value).TotalSeconds);
+    (int)Math.Round((DateTime.UtcNow - AsUtc(run.MasterStartAtUtc!.Value)).TotalSeconds);
 
 
 static object BuildState(Run run) => new
 {
     runId = run.Id,
-    serverTimeUtc = DateTime.UtcNow.ToUniversalTime().ToString("o"),
+    serverTimeUtc = DateTime.UtcNow.ToString("o"),
     masterStartAtUtc = run.MasterStartAtUtc.HasValue
-    ? run.MasterStartAtUtc.Value.ToUniversalTime().ToString("o")
-    : null,
+        ? AsUtc(run.MasterStartAtUtc.Value).ToString("o")     // ✅ was ToUniversalTime()
+        : null,
     preteachSec = run.PreteachSec,
     walkBufferSec = run.WalkBufferSec,
     baseOfferingSec = run.BaseOfferingSec,
     spanish = new
     {
         sermonEndEtaSec = run.SpanishSermonEndEtaSec,
-        etaUpdatedAtUtc = run.SpanishEtaUpdatedAtUtc?.ToUniversalTime().ToString("o"),
+        etaUpdatedAtUtc = run.SpanishEtaUpdatedAtUtc.HasValue
+            ? AsUtc(run.SpanishEtaUpdatedAtUtc.Value).ToString("o")  // ✅ normalize
+            : null,
         sermonEndedAtSec = run.SpanishSermonEndedAtSec,
     },
-
     english = new
     {
         segments = run.Segments
-            .OrderBy(s => s.Order)
-            .Select(s => new
-            {
-                id = s.Id,
-                order = s.Order,
-                name = s.Name,
-                plannedSec = s.PlannedSec,
-                actualSec = s.ActualSec,
-                driftSec = s.DriftSec,
-                completed = s.Completed
-            }).ToArray(),
+        .OrderBy(s => s.Order)
+        .Select(s => new
+        {
+            id = s.Id,
+            order = s.Order,
+            name = s.Name,
+            plannedSec = s.PlannedSec,
+            actualSec = s.ActualSec,
+            driftSec = s.DriftSec,
+            completed = s.Completed
+        }).ToArray(),
         runningDriftBeforeOfferingSec = run.Segments
-            .Where(s => s.Completed)
-            .Sum(s => (int?)s.DriftSec ?? 0),
+        .Where(s => s.Completed)
+        .Sum(s => (int?)s.DriftSec ?? 0),
         offeringStartedAtSec = run.EnglishOfferingStartedAtSec
     },
     offeringSuggestion = new { stretchSec = 0, offeringTargetSec = run.BaseOfferingSec }
 };
-
 
 // ---- Endpoints (EF-only) ----
 
@@ -107,7 +114,8 @@ async (Guid id, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =
         .FirstOrDefaultAsync(r => r.Id == id);
     if (run is null) return Results.NotFound();
 
-    run.MasterStartAtUtc ??= DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc);
+    //you want me to change the below line...
+    run.MasterStartAtUtc ??= DateTime.UtcNow;
     await db.SaveChangesAsync();
 
     // Build current StateDto (use your existing builder if you have one)
@@ -215,7 +223,7 @@ async (Guid id, int segmentId, AppDbContext db, IHubContext<ServiceSyncHub, ISyn
     if (!seg.Completed)
     {
         seg.Completed = true;
-        seg.ActualSec ??= (int)Math.Round((DateTime.UtcNow - run.MasterStartAtUtc.Value).TotalSeconds);
+        seg.ActualSec ??= (int)Math.Round((DateTime.UtcNow - AsUtc(run.MasterStartAtUtc.Value)).TotalSeconds);
         // ---- compute DriftSec (duration - planned) ----
         var prev = run.Segments
             .Where(s => s.Order < seg.Order && s.Completed && s.ActualSec != null)
@@ -281,7 +289,7 @@ app.MapPost("/api/runs/{id:guid}/spanish/ended", async (Guid id, int? endedAtSec
 {
     var run = await db.Runs.FindAsync(id);
     if (run is null || run.MasterStartAtUtc is null) return Results.BadRequest("Run not live or not found");
-    var sec = endedAtSec ?? (int)Math.Round((DateTime.UtcNow - run.MasterStartAtUtc.Value).TotalSeconds);
+    var sec = endedAtSec ?? (int)Math.Round((DateTime.UtcNow - AsUtc(run.MasterStartAtUtc.Value)).TotalSeconds);
     run.SpanishSermonEndedAtSec ??= sec;
     await db.SaveChangesAsync();
     var state = await db.Runs.Include(r => r.Segments).Where(r => r.Id == id).Select(r => r).FirstAsync();
