@@ -4,14 +4,12 @@ import { ActivatedRoute } from '@angular/router';
 import {
   Observable, Subscription, interval, map, startWith, combineLatest
 } from 'rxjs';
-import { FormControl, ReactiveFormsModule } from '@angular/forms';       // ✅ added
 import { TimePipe } from '../../shared/time.pipe';
 import { SignedTimePipe } from '../../shared/signed-time.pipe';
 import { SignalrService } from '../../core/services/signalr';
 import type { StateDto as BaseStateDto } from '../../core/services/signalr';
 import { RundownService } from '../../store/rundown.service';
 import { RundownSegment } from '../../models/rundown.models';
-import { secondsRemaining } from '../../shared/time-helpers';            // ✅ added
 
 type StateDto = BaseStateDto & {
   spanish: BaseStateDto['spanish'] & { sermonEndEtaSec?: number };
@@ -31,7 +29,7 @@ type EnglishSeg = {
 @Component({
   standalone: true,
   selector: 'app-spanish-view',
-  imports: [CommonModule, TimePipe, SignedTimePipe, ReactiveFormsModule], // ✅ added ReactiveFormsModule
+  imports: [CommonModule, TimePipe, SignedTimePipe], // 
   templateUrl: './spanish-view.component.html',
   styleUrls: ['./spanish-view.component.css'],
 })
@@ -43,10 +41,7 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
   private subRoute?: Subscription;
   private subState?: Subscription;
   runId!: string;
-  timeLeftSec = new FormControl<number | null>(null);                    // ✅ now resolves
 
-  remainingSec: number | null = null;
-  private timerId?: any;
   private currentRunId?: string;
 
   // Streams
@@ -90,11 +85,6 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
       this.updateHighlight(this.state);
     });
 
-    // subscribe to state updates for live ETA countdown
-    this.sync.state$.subscribe((s) => {
-      this.updateRemaining(s);
-      this.ensureTicker(s);
-    });
   }
 
   ngOnDestroy() {
@@ -102,30 +92,8 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
     this.subState?.unsubscribe();
     this.hub.disconnect();
     this.rundown.dispose();
-    if (this.timerId) clearInterval(this.timerId);
   }
 
-  // operator clicks “Send”
-  async sendEta() {
-    const runId = this.runId;                                           // ✅ use existing runId
-    const eta = this.timeLeftSec.value;
-    if (!runId || eta == null || eta < 0) return;
-    await this.sync.setSpanishEta(runId, eta);
-  }
-
-  private updateRemaining(s: StateDto | null) {
-    if (!s) { this.remainingSec = null; return; }
-    const eta = s.spanish?.sermonEndEtaSec ?? null;
-    const updated = s.spanish?.etaUpdatedAtUtc ?? null;
-    const offset = (this.sync as any)['serverOffsetMs'] ?? 0;
-    this.remainingSec = secondsRemaining(eta, updated, offset);
-  }
-
-  private ensureTicker(s: StateDto | null) {
-    if (this.timerId) { clearInterval(this.timerId); this.timerId = undefined; }
-    if (!s?.spanish?.sermonEndEtaSec || !s.spanish.etaUpdatedAtUtc) return;
-    this.timerId = setInterval(() => this.updateRemaining(this.sync.state$.value), 500);
-  }
 
   // ---------- Actions ----------
   startRun() { this.hub.startRun(this.runId); }

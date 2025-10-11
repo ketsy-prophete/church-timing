@@ -5,7 +5,6 @@
 
 <!-- ======= PRODUCER (renders when state is available) ======= -->
 <ng-container *ngIf="(state$ | async) as s; else editorFallback">
-
   <!-- Title / clocks / live status -->
   <div class="titlebar">
     <h2>English — Producer</h2>
@@ -48,14 +47,6 @@
     <ng-template #noEnd>Ended at —</ng-template>
   </div>
 
-  <!-- Spanish ETA live countdown -->
-  <div class="status" style="margin-top:8px">
-    <strong>Spanish ETA:</strong>
-    <span *ngIf="spanishRemainingSec !== null; else noEtaLive">
-      {{ spanishRemainingSec | mmss }}
-    </span>
-    <ng-template #noEtaLive>—</ng-template>
-  </div>
 
   <!-- Drift + offering suggestion -->
   <div class="segments-head">
@@ -63,7 +54,7 @@
     <div class="total-drift">
       Total Drift:
       <span [class.under]="(s.english.runningDriftBeforeOfferingSec ?? 0) < 0"
-            [class.over]="(s.english.runningDriftBeforeOfferingSec ?? 0) > 0">
+        [class.over]="(s.english.runningDriftBeforeOfferingSec ?? 0) > 0">
         {{ (s.english.runningDriftBeforeOfferingSec ?? 0) | signedmmss }}
       </span>
 
@@ -129,9 +120,8 @@
 
   <!-- Toasts -->
   <div class="toast-wrap" aria-live="polite" aria-atomic="true">
-    <div class="toast" *ngFor="let t of etaToasts; trackBy: trackById"
-         [class.delta-early]="t.deltaFromTarget < 0"
-         [class.delta-late]="t.deltaFromTarget > 0">
+    <div class="toast" *ngFor="let t of etaToasts; trackBy: trackById" [class.delta-early]="t.deltaFromTarget < 0"
+      [class.delta-late]="t.deltaFromTarget > 0">
       <div><b>Spanish ETA updated</b></div>
       <div>ETA: {{ t.remSec | mmss }}</div>
       <small class="stamp">{{ t.wall | date:'h:mm a' }}</small>
@@ -177,6 +167,7 @@
       </tbody>
     </table>
   </div>
+  <ng-template #loading>Loading…</ng-template>
 </section>
 
 <!-- ================== FALLBACK (Editor) ================== -->
@@ -213,4 +204,3 @@
     </div>
   </ng-container>
 </ng-template>
-

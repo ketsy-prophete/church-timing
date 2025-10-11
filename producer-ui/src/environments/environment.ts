@@ -1,5 +1,5 @@
 export const environment = {
   production: false,
-  apiBaseUrl: 'https://mathematics-military-cloth-farms.trycloudflare.com',
-  hubUrl: 'https://mathematics-military-cloth-farms.trycloudflare.com/hubs/serviceSync'
+  apiBaseUrl: 'https://retail-complimentary-trust-expect.trycloudflare.com',
+  hubUrl: 'https://retail-complimentary-trust-expect.trycloudflare.com/hubs/serviceSync'
 };

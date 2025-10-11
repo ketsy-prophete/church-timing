@@ -89,22 +89,6 @@
         </span>
       </div>
 
-      <!-- LINE 2: Numeric ETA + live countdown -->
-      <div class="bar" style="margin-top:8px">
-        <label>Time Left (sec):
-          <input type="number" [formControl]="timeLeftSec" min="0" step="1" />
-        </label>
-        <button type="button" (click)="sendEta()">Send ETA</button>
-      </div>
-
-      <div class="status" style="margin-top:4px">
-        <strong>Live countdown:</strong>
-        <span *ngIf="remainingSec !== null; else noEta">
-          {{ remainingSec | mmss }}
-        </span>
-        <ng-template #noEta>—</ng-template>
-      </div>
-
       <!-- LINE 3: Sermon Ended At -->
       <div style="margin-top:32px">
         <p style="margin:8px 0 0 0">
