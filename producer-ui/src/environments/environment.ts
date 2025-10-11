@@ -1,5 +1,5 @@
 export const environment = {
   production: false,
-  apiBaseUrl: 'https://retail-complimentary-trust-expect.trycloudflare.com',
-  hubUrl: 'https://retail-complimentary-trust-expect.trycloudflare.com/hubs/serviceSync'
+  apiBaseUrl: 'https://pole-def-evaluating-paso.trycloudflare.com',
+  hubUrl: 'https://pole-def-evaluating-paso.trycloudflare.com/hubs/serviceSync'
 };

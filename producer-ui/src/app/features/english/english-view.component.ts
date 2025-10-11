@@ -10,6 +10,7 @@ import type { StateDto as ViewStateDto } from '../../core/services/signalr';
 import { TimePipe } from '../../shared/time.pipe';
 import { SignedTimePipe } from '../../shared/signed-time.pipe';
 import { RundownService } from '../../store/rundown.service';
+import { TickerService } from '../../core/services/ticker.service';
 
 interface EtaToast {
   id: number;
@@ -26,11 +27,21 @@ interface EtaToast {
   styleUrls: ['./english-view.component.css'],
 })
 export class EnglishViewComponent implements OnInit, OnDestroy {
+  // private readonly signalr = inject(SignalrService);
+  private readonly ticker = inject(TickerService);
 
   // ---------- DI ----------
   private route = inject(ActivatedRoute);
   private fb = inject(FormBuilder);
   public hub = inject(SignalrService);
+
+  offsetMs$ = this.hub.offsetMs$;
+  state$ = this.hub.state$;
+
+  serverNow$ = combineLatest([this.ticker.now$, this.offsetMs$]).pipe(
+    map(([now, offset]) => now - (offset ?? 0))
+  );
+
 
   constructor(private rundownService: RundownService) { }
 
@@ -43,7 +54,6 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
   showMiniRundown = false;
 
   // ---------- Reactive state (read-only streams from service) ----------
-  readonly state$ = this.hub.state$;
   readonly isLive$ = this.hub.isLive$;
   readonly lastSyncAgo$ = this.hub.lastSyncAgo$;
   readonly masterCountdown$ = this.hub.masterCountdown$;
@@ -77,7 +87,10 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
   private lastSermonEndSec: number | null = null;
   private toastIdSeq = 1;
 
-  @ViewChild('etaChime') etaChime?: ElementRef<HTMLAudioElement>;
+  rawSpanishInputSec: number | null = null;
+
+
+  // @ViewChild('etaChime') etaChime?: ElementRef<HTMLAudioElement>;
 
   // ---------- Row highlight ----------
   private prevCompletedIds = new Set<string>();
@@ -134,6 +147,16 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
       this.state = s;
       if (!s) return;
 
+      // sermonEndEtaSec = adjusted ETA relative to master
+      // etaUpdatedAtUtc = actual timestamp when Spanish sent it
+      // derive how many seconds Spanish *typed* (raw input)
+      if (s.spanish?.etaUpdatedAtUtc && s.spanish.sermonEndEtaSec != null) {
+        const sentAtMs = Date.parse(s.spanish.etaUpdatedAtUtc);
+        const serverNow = this.hub.serverNowMs();
+        const ageSec = Math.max(0, Math.floor((serverNow - sentAtMs) / 1000));
+        this.rawSpanishInputSec = Math.max(0, s.spanish.sermonEndEtaSec + ageSec);
+      }
+
       // Toast triggers
       const eta = s.spanish?.sermonEndEtaSec;
       if (typeof eta === 'number') this.onEtaUpdated(eta);
@@ -147,6 +170,7 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
       // Segment highlight
       this.updateHighlight(s);
     });
+
 
     // 3) ViewModel: hub.masterCountdown$ (server-anchored) + state
     this.vm$ = combineLatest([
@@ -222,6 +246,20 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
     return Math.max(0, Math.floor(ms / 1000));
   }
 
+
+  // masterElapsedSec$ = combineLatest([this.state$, this.serverNow$]).pipe(
+  //   map(([s, serverNow]) => {
+  //     if (!s?.masterStartAtUtc) return 0;
+  //     const start = Date.parse(s.masterStartAtUtc);
+  //     return Math.max(0, Math.floor((serverNow - start) / 1000));
+  //   })
+  // );
+
+  // masterRemainingSec$ = this.masterElapsedSec$.pipe(
+  //   map(elapsed => Math.max(0, this.hub.masterTargetSec - elapsed))
+  // );
+
+
   private spanishAnchorOrPlannedSec(s: ViewStateDto): number {
     const ended = s.spanish?.sermonEndedAtSec;
     const eta = s.spanish?.sermonEndEtaSec;
@@ -263,7 +301,7 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
     const id = this.toastIdSeq++;
     const wall = new Date(this.hub.serverNowMs());
     this.etaToasts = [...this.etaToasts, { id, remSec, wall, deltaFromTarget }];
-    try { await this.etaChime?.nativeElement.play(); } catch { }
+    // try { await this.etaChime?.nativeElement.play(); } catch { }
   }
 
   private pushSermonEndedToast() {
@@ -318,13 +356,13 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
     for (let i = 0; i < idx; i++) if (!segs[i].completed) return false;
     return !segs[idx].completed;
   }
-  activeElapsedSec(idx: number, segs: any[]): number {
+  activeElapsedSec(idx: number, segs: any[], s: ViewStateDto): number {
     let prevActual = 0;
     for (let i = idx - 1; i >= 0; i--) {
       const a = segs[i].actualSec;
       if (segs[i].completed && typeof a === 'number') { prevActual = a; break; }
     }
-    const masterStartMs = Date.parse(this.state!.masterStartAtUtc!);
+    const masterStartMs = Date.parse(s.masterStartAtUtc!);
     const segStartMs = masterStartMs + prevActual * 1000;
     const nowMs = this.hub.serverNowMs();
     return Math.max(0, Math.floor((nowMs - segStartMs) / 1000));

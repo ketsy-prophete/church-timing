@@ -1,68 +1,88 @@
-<!-- producer.component.html -->
+<!-- english-view.component.html -->
 <div style="padding:16px" class="toolbar">
-  <a class="btn btn-secondary" routerLink="/rundown">Open Service Rundown</a>
+  <a class="btn btn-secondary" *ngIf="runId as id" [routerLink]="['/runs', id, 'editor']">
+    Open Service Rundown
+  </a>
 </div>
 
 <!-- ======= PRODUCER (renders when state is available) ======= -->
 <ng-container *ngIf="(state$ | async) as s; else editorFallback">
   <!-- Title / clocks / live status -->
   <div class="titlebar">
-    <h2>English — Producer</h2>
-    <span class="dot" [class.live]="!!s.masterStartAtUtc" [class.ended]="s.spanish?.sermonEndedAtSec"></span>
-
-    <!-- right side clocks and last sync -->
+    <div class="title-left">
+      <h2>English — Producer</h2>
+      <span class="dot" [class.live]="!!s.masterStartAtUtc"
+        [class.ended]="(s.spanish?.sermonEndedAtSec ?? 0) > 0"></span>
+    </div>
     <div class="clock">
       <div class="stack">
         <span class="clock-time">{{ etNow$ | async }}</span>
         <span class="clock-date">{{ etDate$ | async }}</span>
       </div>
-      <small class="last-sync">Last sync {{ lastSyncAgo$ | async }}s</small>
     </div>
   </div>
-
   <!-- Master timer line -->
-  <div class="bar" *ngIf="(hub.masterCountdown$ | async) as mc">
-    <b [class.time-red]="mc <= 0">Master Timer — {{ (mc > 0 ? mc : 0) | mmss }}</b>
+  <div class="bar bar-timer" *ngIf="(hub.masterCountdown$ | async) as mc">
+    <b [class.time-red]="$any(mc) <= 0">Master Timer — {{ ($any(mc) > 0 ? $any(mc) : 0) | mmss }}</b>
+    <small class="last-sync">Last sync {{ lastSyncAgo$ | async }}s</small>
   </div>
+  <br>
 
   <!-- Controls -->
   <div class="bar">
     <button (click)="startRun()" [disabled]="!!s.masterStartAtUtc">Start Master</button>
     <button (click)="startOffering()" [disabled]="isOfferingLocked(s)">Start Offering</button>
   </div>
+  <br>
 
   <!-- Spanish status -->
   <div class="bar">
     <b>Spanish:</b>
+
+    <!-- Estimated ETA (existing computed version) -->
     <ng-container *ngIf="spanishEtaSec(s) as eta; else noEta">
-      ETA {{ eta | mmss }}
+      Estimated ETA {{ eta | mmss }}
     </ng-container>
-    <ng-template #noEta>ETA —</ng-template>
+    <ng-template #noEta>Estimated ETA —</ng-template>
 
     <span style="opacity:.6; margin:0 8px;">|</span>
 
+    <!-- Inputted ETA (raw, as Spanish sent it) -->
+    <!-- <ng-container *ngIf="rawSpanishInputSec !== null; else noRaw">
+      Inputted ETA {{ rawSpanishInputSec | mmss }}
+    </ng-container>
+    <ng-template #noRaw>Inputted ETA —</ng-template> -->
+
+    <!-- <span style="opacity:.6; margin:0 8px;">|</span>  use this for three sections -->
+    <span style="opacity:.6; margin:0 0px;"></span>
+
+
+    <!-- Ended At (unchanged) -->
     <ng-container *ngIf="spanishEndedAtWallTime() as ended; else noEnd">
       Ended at {{ ended | date:'h:mm a' }}
     </ng-container>
     <ng-template #noEnd>Ended at —</ng-template>
   </div>
 
+  <!-- Suggested offering (its own row, below Spanish) -->
+  <div class="bar bar-offering" *ngIf="predictedLengthSec(s) as len">
+    <!-- <div>
+      <b>Suggested offering:</b> {{ len | mmss }}
+      <small *ngIf="predictedExtensionSec(s) as ext">
+        <ng-container *ngIf="ext > 0">(stretch +{{ ext | mmss }})</ng-container>
+      </small>
+    </div> -->
+    <br>
+    <br>
+  </div>
 
-  <!-- Drift + offering suggestion -->
+  <!-- Drift (header only) -->
   <div class="segments-head">
-    <h3>Rundown</h3>
     <div class="total-drift">
-      Total Drift:
+      Rundown Total Drift:
       <span [class.under]="(s.english.runningDriftBeforeOfferingSec ?? 0) < 0"
         [class.over]="(s.english.runningDriftBeforeOfferingSec ?? 0) > 0">
         {{ (s.english.runningDriftBeforeOfferingSec ?? 0) | signedmmss }}
-      </span>
-
-      <span style="margin-left:12px" *ngIf="predictedLengthSec(s) as len">
-        Suggested offering: {{ len | mmss }}
-        <small *ngIf="predictedExtensionSec(s) as ext">
-          <ng-container *ngIf="ext > 0">(stretch +{{ ext | mmss }})</ng-container>
-        </small>
       </span>
     </div>
   </div>
@@ -75,7 +95,7 @@
           <th>#</th>
           <th>Segment</th>
           <th>Planned</th>
-          <th class="actual-cell">Actual</th>
+          <th class="actual-cell">Timeline Mark</th>
           <th>Drift</th>
           <th>Actions</th>
         </tr>
@@ -92,7 +112,7 @@
               </ng-container>
               <ng-template #runningOrDash>
                 <ng-container *ngIf="isActive(i, s.english.segments); else dash">
-                  {{ activeElapsedSec(i, s.english.segments) | mmss }}
+                  {{ activeElapsedSec(i, s.english.segments, s) | mmss }}
                 </ng-container>
                 <ng-template #dash>—</ng-template>
               </ng-template>
@@ -118,6 +138,7 @@
     </table>
   </div>
 
+
   <!-- Toasts -->
   <div class="toast-wrap" aria-live="polite" aria-atomic="true">
     <div class="toast" *ngFor="let t of etaToasts; trackBy: trackById" [class.delta-early]="t.deltaFromTarget < 0"
@@ -130,7 +151,7 @@
 
     <div class="toast alert" *ngFor="let t of sermonEndToasts; trackBy: trackById">
       <div><b>Spanish Sermon Ended</b></div>
-      <small class="stamp" *ngIf="t.wall as w"><i>{{ w | date:'h:mm:ss a' }}</i></small>
+      <small class="stamp" *ngIf="t.wall as w"><i>{{ w | date:'h:mm a' }}</i></small>
       <button class="toast-close" (click)="closeSermonEndToast(t.id)">×</button>
     </div>
   </div>
@@ -183,7 +204,7 @@
             <th>#</th>
             <th>Segment</th>
             <th>Planned</th>
-            <th>Actual</th>
+            <th>Completion Time</th>
             <th>Segment Drift</th>
             <th>Action</th>
             <th>Ended</th>

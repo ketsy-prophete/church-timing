@@ -38,7 +38,18 @@ export class SignalrService {
   private lastSyncAt = Date.now();
   private pollSub?: Subscription;
 
-  readonly masterTargetSec = 36 * 60;
+  // SignalrService: add an observable for the offset
+  private _offsetMs$ = new BehaviorSubject<number>(0);
+  readonly offsetMs$ = this._offsetMs$.asObservable();
+
+  private setOffsetFromServerIso(iso: string) {
+    const serverMs = this.parseServerUtc(iso);
+    this.serverOffsetMs = serverMs - Date.now();   // correct direction
+    this._offsetMs$.next(this.serverOffsetMs);
+  }
+
+
+  readonly masterTargetSec = 5 * 60;
   readonly state$ = new BehaviorSubject<StateDto | null>(null);
 
   constructor(private http: HttpClient) { }
@@ -48,7 +59,7 @@ export class SignalrService {
 
   private async refreshState(runId: string) {
     const state = await firstValueFrom(this.http.get<StateDto>(`${this.api}/api/runs/${runId}/state`));
-    this.serverOffsetMs = Date.now() - this.parseServerUtc(state.serverTimeUtc);
+    this.setOffsetFromServerIso(state.serverTimeUtc);
     this.lastSyncAt = Date.now();
     this.state$.next(state);
   }
@@ -70,7 +81,6 @@ export class SignalrService {
   async connect(runId: string) {
     console.log('[Connect] called with', runId);
 
-    const previousRunId = this.currentRunId;
     this.currentRunId = runId;
 
 
@@ -89,7 +99,7 @@ export class SignalrService {
       this.hub.on('StateUpdated', (state: StateDto) => {
         this.stopPolling();
         this.lastSyncAt = Date.now();
-        this.serverOffsetMs = Date.parse(state.serverTimeUtc) - Date.now(); // ✅ correct
+        this.setOffsetFromServerIso(state.serverTimeUtc);
         console.log('[OffsetCheck]', {
           serverUtc: state.serverTimeUtc,
           localUtc: new Date().toISOString(),
@@ -142,7 +152,7 @@ export class SignalrService {
   private async syncOnce(runId: string) {
     const url = `${this.api}/api/runs/${runId}/state`;
     const state = await firstValueFrom(this.http.get<StateDto>(url));
-    this.serverOffsetMs = this.parseServerUtc(state.serverTimeUtc) - Date.now();
+    this.setOffsetFromServerIso(state.serverTimeUtc);
     this.lastSyncAt = Date.now();
     this.state$.next(state);
   }
@@ -175,7 +185,7 @@ export class SignalrService {
       catchError(err => { console.warn('[poll] state fetch failed', err); return EMPTY; })
     ).subscribe(s => {
       if (!s) return;
-      this.serverOffsetMs = Date.now() - this.parseServerUtc(s.serverTimeUtc);
+      this.setOffsetFromServerIso(s.serverTimeUtc);
       this.lastSyncAt = Date.now();
       this.state$.next(s);
     });
@@ -204,12 +214,11 @@ export class SignalrService {
     map(([s]) => {
       if (!s?.masterStartAtUtc) return 0;
 
-      const serverNow = this.parseServerUtc(s.serverTimeUtc); // align clocks exactly
       const startMs = this.parseServerUtc(s.masterStartAtUtc);
-      const elapsed = Math.floor((serverNow - startMs) / 1000);
-      const remaining = Math.max(0, this.masterTargetSec - elapsed);
-
-      return remaining;
+      const serverNow = Date.now() - this.serverOffsetMs;   // live server "now"
+      const elapsed = Math.max(0, Math.floor((serverNow - startMs) / 1000));
+      const target = this.masterTargetSec;                  // 36*60 for now
+      return Math.max(0, target - elapsed);
     })
   );
 

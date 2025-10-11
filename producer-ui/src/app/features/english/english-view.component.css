@@ -1,3 +1,41 @@
+/* Turn <a> into a button */
+a.btn {
+  display: inline-block;
+  padding: 5px 14px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;      /* gray-300 */
+  background: #ffffff;            /* gray-100 */
+  text-decoration: none;           /* remove underline */
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Control link colors (no purple visited) */
+a.btn:link,
+a.btn:visited {
+  color: #020b1d;                  /* gray-900 */
+}
+
+/* Secondary variant */
+a.btn.btn-secondary {
+  background: #fcfcfc;             /* indigo-50 */
+  border-color: #100c05;           /* indigo-200 */
+}
+
+a.btn.btn-secondary:hover {
+  background: #a2a1a18f;             /* indigo-100 */
+}
+
+/* Hover/active/focus states */
+a.btn:hover { border-color: #292a2daa; }        /* gray-400 */
+a.btn:active { transform: translateY(1px); }
+a.btn:focus-visible {
+  outline: 2px solid #6366f1;                 /* indigo-500 */
+  outline-offset: 2px;
+}
+
+
     .bar { display:flex; gap:12px; align-items:center; margin:8px 0; }
     table { border-collapse:collapse; }
     th, td { padding:6px 8px; border:1px solid #ccc; }
@@ -5,9 +43,13 @@
     /* ---- Titlebar / live dot / clocks ---- */
     .titlebar { display:flex; align-items:center; gap:12px; }
     .titlebar h2 { margin:0; }
+  
     .dot { width:8px; height:8px; border-radius:50%; background:#bbb; display:inline-block; margin-left:6px; }
     .dot.live { background:#2ecc71; animation:pulse 1s infinite; }
     .dot.ended { background:#e53935; animation:none; }
+
+   
+    .total-drift {white-space:nowrap; font-size: larger;}
 
     .clock {
       margin-left:auto;
