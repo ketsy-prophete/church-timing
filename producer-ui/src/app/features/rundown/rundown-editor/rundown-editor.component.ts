@@ -283,7 +283,7 @@ export class RundownEditorComponent implements OnInit, OnDestroy {
       id: null, // let server assign
       order: i + 1,
       name: ((fg.controls.title.value ?? '').trim() || 'Untitled'),
-      plannedSec: Number(fg.controls.durationSec.value) || 0,
+      plannedSec: fg.controls.startSec?.value ?? 0,
     }));
 
     this.saving = true;

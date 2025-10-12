@@ -11,8 +11,6 @@
   <div class="titlebar">
     <div class="title-left">
       <h2>English Producer</h2>
-      <span class="dot" [class.live]="!!s.masterStartAtUtc"
-            [class.ended]="(s.spanish?.sermonEndedAtSec ?? 0) > 0"></span>
     </div>
     <div class="clock">
       <div class="stack">
@@ -21,10 +19,14 @@
       </div>
     </div>
   </div>
+  <br>
 
   <!-- Master timer line (shows countdown when started; fallback otherwise) -->
   <ng-container *ngIf="s.masterStartAtUtc; else notStarted">
     <div class="bar bar-timer" *ngIf="(hub.masterCountdown$ | async) as mc">
+      <span class="dot" [class.live]="!!s.masterStartAtUtc"
+        [class.ended]="(s.spanish?.sermonEndedAtSec ?? 0) > 0"></span>
+
       <b [class.time-red]="$any(mc) <= 0">Master Timer — {{ ($any(mc) > 0 ? $any(mc) : 0) | mmss }}</b>
       <small class="last-sync">Last sync {{ lastSyncAgo$ | async }}s</small>
     </div>
@@ -74,7 +76,7 @@
     <div class="total-drift">
       Rundown Total Drift:
       <span [class.under]="(s.english.runningDriftBeforeOfferingSec ?? 0) < 0"
-            [class.over]="(s.english.runningDriftBeforeOfferingSec ?? 0) > 0">
+        [class.over]="(s.english.runningDriftBeforeOfferingSec ?? 0) > 0">
         {{ (s.english.runningDriftBeforeOfferingSec ?? 0) | signedmmss }}
       </span>
     </div>
@@ -88,8 +90,8 @@
           <th>#</th>
           <th>Segment</th>
           <th>Planned</th>
-          <th class="actual-cell">Timeline Mark</th>
-          <th>Drift</th>
+          <th class="actual-cell">Timeline Mark (36 min)</th>
+          <th>Segment Drift</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -97,7 +99,7 @@
         <tr *ngFor="let seg of s.english.segments; let i = index; trackBy: trackBySeg">
           <td>{{ i + 1 }}</td>
           <td [style.fontWeight]="isActive(i, s.english.segments) ? 600 : 400">{{ seg.name }}</td>
-          <td>{{ seg.plannedSec | mmss }}</td>
+          <td>{{ plannedDuration(i, s.english.segments) | mmss }}</td>
           <td class="actual-cell">
             <div class="actual-primary">
               <ng-container *ngIf="seg.completed; else runningOrDash">
@@ -134,7 +136,7 @@
   <!-- Toasts -->
   <div class="toast-wrap" aria-live="polite" aria-atomic="true">
     <div class="toast" *ngFor="let t of etaToasts; trackBy: trackById" [class.delta-early]="t.deltaFromTarget < 0"
-         [class.delta-late]="t.deltaFromTarget > 0">
+      [class.delta-late]="t.deltaFromTarget > 0">
       <div><b>Spanish ETA updated</b></div>
       <div>ETA: {{ t.remSec | mmss }}</div>
       <small class="stamp">{{ t.wall | date:'h:mm a' }}</small>

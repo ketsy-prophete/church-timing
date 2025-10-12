@@ -280,12 +280,15 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
   }
 
   private plannedOfferingStartSec(s: ViewStateDto): number | null {
-    const idx = s.english.segments.findIndex(x => /offering/i.test(x.name));
+    const segs = s.english.segments ?? [];
+    const idx = segs.findIndex(x => /offering/i.test(x.name));
     if (idx < 0) return null;
     let total = 0;
-    for (let i = 0; i < idx; i++) total += (s.english.segments[i].plannedSec ?? 0);
+    for (let i = 0; i < idx; i++) total += this.plannedDuration(i, segs);
     return total;
   }
+
+
 
   private async onEtaUpdated(newEtaAbsSec: number) {
     if (!(newEtaAbsSec > 0)) return;
@@ -332,6 +335,15 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
     const seg = s.english?.segments.find(x => /offering/i.test(x.name));
     return !!seg && (!!seg.completed || (seg.actualSec ?? 0) > 0);
   }
+
+  plannedDuration(i: number, segs: { plannedSec: number }[]): number {
+    if (!segs?.length) return 0;
+    const current = segs[i]?.plannedSec ?? 0;
+    const prev = i > 0 ? (segs[i - 1]?.plannedSec ?? 0) : 0;
+    // If values are already durations (not marks), this will no-op:
+    return current >= prev ? current - prev : current;
+  }
+
 
   // -------- Template helpers --------
   spanishEtaSec(s: any): number | null {

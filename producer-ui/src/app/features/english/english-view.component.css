@@ -3,7 +3,7 @@ a.btn {
   display: inline-block;
   padding: 5px 14px;
   border-radius: 10px;
-  border: 1px solid #d1d5db;      
+  border: 2px solid #d53838;
   background: #ffffff;           
   text-decoration: none;          
   font-weight: 600;
@@ -20,15 +20,15 @@ a.btn:visited {
 /* Secondary variant */
 a.btn.btn-secondary {
   background: #fcfcfc;             
-  border-color: #100c056d;          
+  border-color: #d53838;          
 }
 
 a.btn.btn-secondary:hover {
-  background: #da503b6f;            
+  background: #433c3a38;            
 }
 
 /* Hover/active/focus states */
-a.btn:hover { border-color: #292a2daa; }        
+a.btn:hover { border-color: #2d292c; }        
 a.btn:active { transform: translateY(1px); }
 a.btn:focus-visible {
   outline: 2px solid #6366f1;              
@@ -68,7 +68,9 @@ button.btn, input[type="button"].btn, input[type="submit"].btn {
 .btn.btn-secondary:hover{ background:#a2a1a18f; }
 
 /* Hover/active/focus */
-.btn:hover{ border-color:#d067676d; }
+.btn:hover{ border-color:#2d292c; }
+.btn:hover { background: #433c3a38; }        
+
 .btn:active{ transform:translateY(1px); }
 .btn:focus-visible{
   outline:2px solid #6366f1;
@@ -78,7 +80,7 @@ button.btn, input[type="button"].btn, input[type="submit"].btn {
 /* Disabled (covers both <a>.disabled and [disabled]) */
 .btn[disabled],
 .btn.disabled{
-  opacity:.55;
+  opacity:.30;
   cursor:not-allowed;
   pointer-events:none;
   transform:none;

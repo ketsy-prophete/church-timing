@@ -58,7 +58,9 @@ button.btn, input[type="button"].btn, input[type="submit"].btn {
 .btn.btn-secondary:hover{ background:#a2a1a18f; }
 
 /* Hover/active/focus */
-.btn:hover{ border-color:#d067676d; }
+.btn:hover{ border-color:#2d292c; }
+.btn:hover { background: #433c3a38; }        
+
 .btn:active{ transform:translateY(1px); }
 .btn:focus-visible{
   outline:2px solid #6366f1;
@@ -68,7 +70,7 @@ button.btn, input[type="button"].btn, input[type="submit"].btn {
 /* Disabled (covers both <a>.disabled and [disabled]) */
 .btn[disabled],
 .btn.disabled{
-  opacity:.55;
+  opacity:.30;
   cursor:not-allowed;
   pointer-events:none;
   transform:none;
