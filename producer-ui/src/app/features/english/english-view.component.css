@@ -20,11 +20,11 @@ a.btn:visited {
 /* Secondary variant */
 a.btn.btn-secondary {
   background: #fcfcfc;             
-  border-color: #100c05;          
+  border-color: #100c056d;          
 }
 
 a.btn.btn-secondary:hover {
-  background: #a2a1a18f;            
+  background: #da503b6f;            
 }
 
 /* Hover/active/focus states */
