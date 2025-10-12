@@ -1,11 +1,11 @@
-/* Turn <a> into a button */
+/* Turn <a> into a button*/
 a.btn {
   display: inline-block;
   padding: 5px 14px;
   border-radius: 10px;
-  border: 1px solid #d1d5db;      /* gray-300 */
-  background: #ffffff;            /* gray-100 */
-  text-decoration: none;           /* remove underline */
+  border: 1px solid #d1d5db;      
+  background: #ffffff;           
+  text-decoration: none;          
   font-weight: 600;
   line-height: 1;
   cursor: pointer;
@@ -14,26 +14,76 @@ a.btn {
 /* Control link colors (no purple visited) */
 a.btn:link,
 a.btn:visited {
-  color: #020b1d;                  /* gray-900 */
+  color: #020b1d;                  
 }
 
 /* Secondary variant */
 a.btn.btn-secondary {
-  background: #fcfcfc;             /* indigo-50 */
-  border-color: #100c05;           /* indigo-200 */
+  background: #fcfcfc;             
+  border-color: #100c05;          
 }
 
 a.btn.btn-secondary:hover {
-  background: #a2a1a18f;             /* indigo-100 */
+  background: #a2a1a18f;            
 }
 
 /* Hover/active/focus states */
-a.btn:hover { border-color: #292a2daa; }        /* gray-400 */
+a.btn:hover { border-color: #292a2daa; }        
 a.btn:active { transform: translateY(1px); }
 a.btn:focus-visible {
-  outline: 2px solid #6366f1;                 /* indigo-500 */
+  outline: 2px solid #6366f1;              
   outline-offset: 2px;
+} 
+
+
+/* Base button (works for <a>, <button>, <input>) */
+.btn{
+  display:inline-block;
+  padding:5px 14px;
+  border-radius:10px;
+  border:1px solid #dbd3d1;
+  background:#fff;
+  text-decoration:none;
+  font-weight:600;
+  line-height:1;
+  cursor:pointer;
+  user-select:none;
 }
+
+/* Ensure text color consistent for links */
+a.btn:link, a.btn:visited { color:#020b1d; }
+
+/* Make native buttons look identical */
+button.btn, input[type="button"].btn, input[type="submit"].btn {
+  color:#020b1d;
+  background:#fff;
+  border:2px solid #d53838;
+}
+
+/* Variant */
+.btn.btn-secondary{
+  background:#fcfcfc;
+  border-color:#100c05;
+}
+.btn.btn-secondary:hover{ background:#a2a1a18f; }
+
+/* Hover/active/focus */
+.btn:hover{ border-color:#d067676d; }
+.btn:active{ transform:translateY(1px); }
+.btn:focus-visible{
+  outline:2px solid #6366f1;
+  outline-offset:2px;
+}
+
+/* Disabled (covers both <a>.disabled and [disabled]) */
+.btn[disabled],
+.btn.disabled{
+  opacity:.55;
+  cursor:not-allowed;
+  pointer-events:none;
+  transform:none;
+}
+
 
 
     .bar { display:flex; gap:12px; align-items:center; margin:8px 0; }
@@ -61,7 +111,7 @@ a.btn:focus-visible {
     .clock .stack {
       display:flex;
       flex-direction:column;
-      align-items:flex-end;
+      /* align-items:flex-end; */
       line-height:1.15;
     }
     .clock-time { font-weight:700; font-size:20px; line-height:1; }
@@ -71,7 +121,8 @@ a.btn:focus-visible {
     @keyframes pulse { 0%{opacity:.4} 50%{opacity:1} 100%{opacity:.4} }
 
     /* ---- Segments table / states ---- */
-    .segments-wrap { display:inline-block; }
+    .segments-wrap { display:inline-block; border:1px solid #d6d6d6; border-radius:12px; overflow:hidden; background:#fff;
+}
     .segments-wrap table { width:auto; }
     .segments-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin:16px 0 8px; }
     .segments-head h3 { margin:0; }

@@ -1,3 +1,79 @@
+/* CSS-only alternative if you can't wrap */
+table.completed-english{
+  border:1px solid #d6d6d6;
+  border-radius:12px;
+  border-collapse:separate;
+  border-spacing:0;
+  overflow:hidden; /* some browsers honor this on table */
+}
+table.completed-english th, table.completed-english td{
+  border:1px solid #e2e2e2;
+  padding:6px 8px;
+}
+.segments-wrap{
+  border:1px solid #d6d6d6;
+  border-radius:12px;
+  overflow:hidden;        /* clips inner corners */
+  background:#fff;
+  margin:12px 0;
+}
+.segments-wrap table{
+  width:100%;
+  border-collapse:collapse;
+}
+.segments-wrap thead th{
+  background:#f7f8fa;
+  font-weight:600;
+}
+
+/* Base button (works for <a>, <button>, <input>) */
+.btn{
+  display:inline-block;
+  padding:5px 14px;
+  border-radius:10px;
+  border:1px solid #dbd3d1;
+  background:#fff;
+  text-decoration:none;
+  font-weight:600;
+  line-height:1;
+  cursor:pointer;
+  user-select:none;
+}
+
+/* Ensure text color consistent for links */
+a.btn:link, a.btn:visited { color:#020b1d; }
+
+/* Make native buttons look identical */
+button.btn, input[type="button"].btn, input[type="submit"].btn {
+  color:#020b1d;
+  background:#fff;
+  border:2px solid #d53838;
+}
+
+/* Variant */
+.btn.btn-secondary{
+  background:#fcfcfc;
+  border-color:#100c05;
+}
+.btn.btn-secondary:hover{ background:#a2a1a18f; }
+
+/* Hover/active/focus */
+.btn:hover{ border-color:#d067676d; }
+.btn:active{ transform:translateY(1px); }
+.btn:focus-visible{
+  outline:2px solid #6366f1;
+  outline-offset:2px;
+}
+
+/* Disabled (covers both <a>.disabled and [disabled]) */
+.btn[disabled],
+.btn.disabled{
+  opacity:.55;
+  cursor:not-allowed;
+  pointer-events:none;
+  transform:none;
+}
+
 .titlebar { display:flex; align-items:center; }
 .clock { margin-left:auto; font-weight:600; white-space:nowrap; }
 .bar{display:flex;gap:12px;align-items:center;margin:8px 0}

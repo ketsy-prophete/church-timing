@@ -1,5 +1,5 @@
 export const environment = {
   production: false,
-  apiBaseUrl: 'https://pole-def-evaluating-paso.trycloudflare.com',
-  hubUrl: 'https://pole-def-evaluating-paso.trycloudflare.com/hubs/serviceSync'
+  apiBaseUrl: 'https://apply-challenging-lawyer-colored.trycloudflare.com',
+  hubUrl: 'https://apply-challenging-lawyer-colored.trycloudflare.com/hubs/serviceSync'
 };

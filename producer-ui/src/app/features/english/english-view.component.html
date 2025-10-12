@@ -12,26 +12,35 @@
     <div class="title-left">
       <h2>English — Producer</h2>
       <span class="dot" [class.live]="!!s.masterStartAtUtc"
-        [class.ended]="(s.spanish?.sermonEndedAtSec ?? 0) > 0"></span>
+            [class.ended]="(s.spanish?.sermonEndedAtSec ?? 0) > 0"></span>
     </div>
     <div class="clock">
       <div class="stack">
-        <span class="clock-time">{{ etNow$ | async }}</span>
+        <span class="clock-time">{{ etNow$ | async }} ET</span>
         <span class="clock-date">{{ etDate$ | async }}</span>
       </div>
     </div>
   </div>
-  <!-- Master timer line -->
-  <div class="bar bar-timer" *ngIf="(hub.masterCountdown$ | async) as mc">
-    <b [class.time-red]="$any(mc) <= 0">Master Timer — {{ ($any(mc) > 0 ? $any(mc) : 0) | mmss }}</b>
-    <small class="last-sync">Last sync {{ lastSyncAgo$ | async }}s</small>
-  </div>
-  <br>
+
+  <!-- Master timer line (shows countdown when started; fallback otherwise) -->
+  <ng-container *ngIf="s.masterStartAtUtc; else notStarted">
+    <div class="bar bar-timer" *ngIf="(hub.masterCountdown$ | async) as mc">
+      <b [class.time-red]="$any(mc) <= 0">Master Timer — {{ ($any(mc) > 0 ? $any(mc) : 0) | mmss }}</b>
+      <small class="last-sync">Last sync {{ lastSyncAgo$ | async }}s</small>
+    </div>
+  </ng-container>
+  <ng-template #notStarted>
+    <div class="bar bar-timer">
+      <b>Master Timer — not started</b>
+      <small class="last-sync" *ngIf="lastSyncAgo$ | async as sec">Last sync {{ sec }}s</small>
+    </div>
+  </ng-template>
+
 
   <!-- Controls -->
   <div class="bar">
-    <button (click)="startRun()" [disabled]="!!s.masterStartAtUtc">Start Master</button>
-    <button (click)="startOffering()" [disabled]="isOfferingLocked(s)">Start Offering</button>
+    <button class="btn" (click)="startRun()" [disabled]="!!s.masterStartAtUtc">Start Master</button>
+    <!-- <button (click)="startOffering()" [disabled]="isOfferingLocked(s)">Start Offering</button> -->
   </div>
   <br>
 
@@ -47,31 +56,15 @@
 
     <span style="opacity:.6; margin:0 8px;">|</span>
 
-    <!-- Inputted ETA (raw, as Spanish sent it) -->
-    <!-- <ng-container *ngIf="rawSpanishInputSec !== null; else noRaw">
-      Inputted ETA {{ rawSpanishInputSec | mmss }}
-    </ng-container>
-    <ng-template #noRaw>Inputted ETA —</ng-template> -->
-
-    <!-- <span style="opacity:.6; margin:0 8px;">|</span>  use this for three sections -->
-    <span style="opacity:.6; margin:0 0px;"></span>
-
-
-    <!-- Ended At (unchanged) -->
+    <!-- Ended At -->
     <ng-container *ngIf="spanishEndedAtWallTime() as ended; else noEnd">
       Ended at {{ ended | date:'h:mm a' }}
     </ng-container>
     <ng-template #noEnd>Ended at —</ng-template>
   </div>
 
-  <!-- Suggested offering (its own row, below Spanish) -->
+  <!-- Suggested offering (reserved row; currently blank by design) -->
   <div class="bar bar-offering" *ngIf="predictedLengthSec(s) as len">
-    <!-- <div>
-      <b>Suggested offering:</b> {{ len | mmss }}
-      <small *ngIf="predictedExtensionSec(s) as ext">
-        <ng-container *ngIf="ext > 0">(stretch +{{ ext | mmss }})</ng-container>
-      </small>
-    </div> -->
     <br>
     <br>
   </div>
@@ -81,7 +74,7 @@
     <div class="total-drift">
       Rundown Total Drift:
       <span [class.under]="(s.english.runningDriftBeforeOfferingSec ?? 0) < 0"
-        [class.over]="(s.english.runningDriftBeforeOfferingSec ?? 0) > 0">
+            [class.over]="(s.english.runningDriftBeforeOfferingSec ?? 0) > 0">
         {{ (s.english.runningDriftBeforeOfferingSec ?? 0) | signedmmss }}
       </span>
     </div>
@@ -130,7 +123,7 @@
             <ng-template #nodrift>—</ng-template>
           </td>
           <td>
-            <button *ngIf="!seg.completed; else done" (click)="completeSegment(seg.id)">Complete</button>
+            <button class="btn" *ngIf="!seg.completed; else done" (click)="completeSegment(seg.id)">Complete</button>
             <ng-template #done>✓</ng-template>
           </td>
         </tr>
@@ -138,11 +131,10 @@
     </table>
   </div>
 
-
   <!-- Toasts -->
   <div class="toast-wrap" aria-live="polite" aria-atomic="true">
     <div class="toast" *ngFor="let t of etaToasts; trackBy: trackById" [class.delta-early]="t.deltaFromTarget < 0"
-      [class.delta-late]="t.deltaFromTarget > 0">
+         [class.delta-late]="t.deltaFromTarget > 0">
       <div><b>Spanish ETA updated</b></div>
       <div>ETA: {{ t.remSec | mmss }}</div>
       <small class="stamp">{{ t.wall | date:'h:mm a' }}</small>

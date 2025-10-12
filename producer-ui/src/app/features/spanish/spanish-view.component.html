@@ -31,57 +31,56 @@
 
   <div *ngIf="state as s">
     <h3 style="margin-top:12px">Completed in English</h3>
-    <table>
-      <tr>
-        <th>#</th>
-        <th>Segment</th>
-        <th>Segment Drift</th>
-        <th>Total Drift</th>
-        <th>Status</th>
-        <th>Ended</th>
-      </tr>
+    <div class="segments-wrap">
+      <table>
+        <tr>
+          <th>#</th>
+          <th>Segment</th>
+          <th>Segment Drift</th>
+          <th>Total Drift</th>
+          <th>Status</th>
+          <th>Ended</th>
+        </tr>
 
-      <tr *ngFor="let row of completedEnglishWithRunning; let idx = index; trackBy: trackBySegWrap"
+        <tr *ngFor="let row of completedEnglishWithRunning; let idx = index; trackBy: trackBySegWrap"
           [class.highlight]="row.seg.id === lastCompletedId">
-        <td>{{ (row.seg.order ?? (idx + 1)) }}</td>
-        <td>{{ row.seg.name }}</td>
-        <td>{{ (row.seg.driftSec ?? 0) | signedmmss }}</td>
-        <td [style.color]="row.running > 4 ? 'black' : row.running < -4 ? 'red' : 'inherit'">
-          {{ row.running | signedmmss:true }}
-        </td>
-        <td>Complete</td>
-        <td>
-          <ng-container *ngIf="endedAtFor(row.seg.id, completedEnglishSorted) as endedAt; else noEnded">
-            {{ endedAt | date:'h:mm a':'America/New_York' }}
-          </ng-container>
-          <ng-template #noEnded>—</ng-template>
-        </td>
-      </tr>
-    </table>
+          <td>{{ (row.seg.order ?? (idx + 1)) }}</td>
+          <td>{{ row.seg.name }}</td>
+          <td>{{ (row.seg.driftSec ?? 0) | signedmmss }}</td>
+          <td [style.color]="row.running > 4 ? 'black' : row.running < -4 ? 'red' : 'inherit'">
+            {{ row.running | signedmmss:true }}
+          </td>
+          <td>Complete</td>
+          <td>
+            <ng-container *ngIf="endedAtFor(row.seg.id, completedEnglishSorted) as endedAt; else noEnded">
+              {{ endedAt | date:'h:mm a':'America/New_York' }}
+            </ng-container>
+            <ng-template #noEnded>—</ng-template>
+          </td>
+        </tr>
+      </table>
+    </div>
 
     <!-- Bottom controls -->
     <div style="margin-top:16px">
       <!-- LINE 1: Spanish ETA input -->
       <div class="bar">
         <label>Time Left:
-          <input #eta size="5" placeholder="mm:ss"
-                 pattern="^\\d{1,3}:[0-5]\\d$"
-                 title="Enter minutes and seconds like 1:30"
-                 (keyup.enter)="setSpanishEtaFromText(eta.value)">
+          <input #eta size="5" placeholder="mm:ss" pattern="^\\d{1,3}:[0-5]\\d$"
+            title="Enter minutes and seconds like 1:30" (keyup.enter)="setSpanishEtaFromText(eta.value)">
         </label>
 
-        <button type="button" style="margin-left:12px"
-                (click)="setSpanishEtaFromText(eta.value)"
-                [disabled]="!state?.masterStartAtUtc || !mmssValid(eta.value)">
+        <button class="btn" type="button" style="margin-left:12px" (click)="setSpanishEtaFromText(eta.value)"
+          [disabled]="!state?.masterStartAtUtc || !mmssValid(eta.value)">
           Send ETA
         </button>
 
         <span style="margin-left:12px; opacity:.95">
-          <span style="color:#1e40af; font-weight:700; font-size:13px">
+          <span style="color:#4b62ad; font-weight:700; font-size:13px">
             Current Time Left:
           </span>
           <ng-container *ngIf="currentSpanishRemainingSec() as rem; else noneEta">
-            <span style="color:#1e40af; font-weight:700; font-size:13px">
+            <span style="color:#4b62ad; font-weight:700; font-size:13px">
               {{ rem | mmss }}
             </span>
           </ng-container>
@@ -102,8 +101,7 @@
 
       <!-- LINE 4: Sermon End button -->
       <div style="margin-top:6px">
-        <button (click)="sermonEnd()"
-                [disabled]="sermonEndClicked || (state?.spanish?.sermonEndedAtSec ?? 0) > 0">
+        <button class="btn" (click)="sermonEnd()" [disabled]="sermonEndClicked || (state?.spanish?.sermonEndedAtSec ?? 0) > 0">
           Sermon End
         </button>
       </div>
