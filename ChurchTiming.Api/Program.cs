@@ -24,7 +24,6 @@ builder.Services.AddCors(o => o.AddPolicy(CorsPolicy, p =>
     .AllowAnyMethod()
     .AllowCredentials();
 }));
-
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
 
