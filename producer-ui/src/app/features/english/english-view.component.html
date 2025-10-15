@@ -99,7 +99,7 @@
         <tr *ngFor="let seg of s.english.segments; let i = index; trackBy: trackBySeg">
           <td>{{ i + 1 }}</td>
           <td [style.fontWeight]="isActive(i, s.english.segments) ? 600 : 400">{{ seg.name }}</td>
-          <td>{{ plannedDuration(i, s.english.segments) | mmss }}</td>
+          <td>{{ seg.plannedSec | mmss }}</td>
           <td class="actual-cell">
             <div class="actual-primary">
               <ng-container *ngIf="seg.completed; else runningOrDash">

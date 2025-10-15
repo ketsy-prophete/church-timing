@@ -49,7 +49,7 @@ export class SignalrService {
   }
 
 
-  readonly masterTargetSec = 5 * 60;
+  readonly masterTargetSec =36 * 60;
   readonly state$ = new BehaviorSubject<StateDto | null>(null);
 
   constructor(private http: HttpClient) { }

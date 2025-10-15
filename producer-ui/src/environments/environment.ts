@@ -1,5 +1,5 @@
 export const environment = {
   production: false,
-  apiBaseUrl: 'https://fragrances-authority-tower-drums.trycloudflare.com',
-  hubUrl: 'https://fragrances-authority-tower-drums.trycloudflare.com/hubs/serviceSync'
+  apiBaseUrl: 'https://motel-validity-antique-aqua.trycloudflare.com',
+  hubUrl: ' https://motel-validity-antique-aqua.trycloudflare.com/hubs/serviceSync'
 };
