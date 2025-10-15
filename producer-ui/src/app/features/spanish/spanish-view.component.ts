@@ -142,7 +142,7 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
   }
 
   private masterElapsedSec(): number | null {
-    const start = this.state?.masterStartAtUtc;
+    const start = this.state?.masterStartUtc;
     if (!start) return null;
     const ms = this.hub.serverNowMs() - Date.parse(start);
     return Math.max(0, Math.floor(ms / 1000));
@@ -202,10 +202,10 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
   }
 
   endedAtFor(segId: string, segs: EnglishSeg[]): Date | null {
-    if (!this.state?.masterStartAtUtc) return null;
+    if (!this.state?.masterStartUtc) return null;
     const seg = segs.find((s) => s.id === segId);
     if (seg?.completed && typeof seg.actualSec === 'number') {
-      const endMs = Date.parse(this.state.masterStartAtUtc) + seg.actualSec * 1000;
+      const endMs = Date.parse(this.state.masterStartUtc) + seg.actualSec * 1000;
       return new Date(endMs);
     }
     return null;
@@ -215,7 +215,7 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
     const ended = this.state?.spanish?.sermonEndedAtSec;
     if (ended != null && ended > 0) return 0;
     const etaAbs = this.state?.spanish?.sermonEndEtaSec;
-    const start = this.state?.masterStartAtUtc;
+    const start = this.state?.masterStartUtc;
     if (etaAbs == null || !start) return null;
     const now = Math.max(0, Math.floor((this.hub.serverNowMs() - Date.parse(start)) / 1000));
     return Math.max(0, etaAbs - now);
@@ -223,7 +223,7 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
 
   spanishEndedAtWallTime(): Date | null {
     const endSec = this.state?.spanish?.sermonEndedAtSec;
-    const startStr = this.state?.masterStartAtUtc;
+    const startStr = this.state?.masterStartUtc;
     if (typeof endSec !== 'number' || endSec <= 0) return null;
     if (!startStr) return null;
     const startMs = Date.parse(startStr);

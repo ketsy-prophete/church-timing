@@ -22,15 +22,20 @@
   <br>
 
   <!-- Master timer line (shows countdown when started; fallback otherwise) -->
-  <ng-container *ngIf="s.masterStartAtUtc; else notStarted">
-    <div class="bar bar-timer" *ngIf="(hub.masterCountdown$ | async) as mc">
-      <span class="dot" [class.live]="!!s.masterStartAtUtc"
-        [class.ended]="(s.spanish?.sermonEndedAtSec ?? 0) > 0"></span>
+  <ng-container *ngIf="s.masterStartUtc; else notStarted">
+    <ng-container *ngIf="vmView$ | async as vm">
+      <div class="bar bar-timer">
+        <span class="dot" [class.live]="vm.mc > 0" [class.ended]="vm.mc <= 0"></span>
 
-      <b [class.time-red]="$any(mc) <= 0">Master Timer — {{ ($any(mc) > 0 ? $any(mc) : 0) | mmss }}</b>
-      <small class="last-sync">Last sync {{ lastSyncAgo$ | async }}s</small>
-    </div>
+        <b [class.time-red]="vm.mc <= 0">
+          Master Timer — {{ (vm.mc > 0 ? vm.mc : 0) | mmss }}
+        </b>
+
+        <small class="last-sync">Last sync {{ lastSyncAgo$ | async }}s</small>
+      </div>
+    </ng-container>
   </ng-container>
+
   <ng-template #notStarted>
     <div class="bar bar-timer">
       <b>Master Timer — not started</b>
@@ -39,9 +44,10 @@
   </ng-template>
 
 
+
   <!-- Controls -->
   <div class="bar">
-    <button class="btn" (click)="startRun()" [disabled]="!!s.masterStartAtUtc">Start Master</button>
+    <button class="btn" (click)="startRun()" [disabled]="!!s.masterStartUtc">Start Master</button>
     <!-- <button (click)="startOffering()" [disabled]="isOfferingLocked(s)">Start Offering</button> -->
   </div>
   <br>
@@ -90,9 +96,9 @@
           <th>#</th>
           <th>Segment</th>
           <th>Planned</th>
-          <th class="actual-cell">Timeline Mark (36 min)</th>
+          <th class="actual-cell">Actual</th>
           <th>Segment Drift</th>
-          <th>Actions</th>
+          <th>Status</th>
         </tr>
       </thead>
       <tbody>

@@ -5,12 +5,24 @@ import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../environments/environment';
 import { switchMap, catchError } from 'rxjs/operators';
 
-export interface SegmentDto { id: string; order: number; name: string; plannedSec: number; actualSec?: number; driftSec?: number; completed: boolean; }
+
+
+
+export interface SegmentDto {
+  id: string;
+  order: number;
+  name: string;
+  plannedSec: number;
+  actualSec?: number;
+  driftSec?: number;
+  completed: boolean;
+}
 
 export interface StateDto {
   runId: string;
   serverTimeUtc: string;               // ISO string from backend
-  masterStartAtUtc?: string;
+  masterStartUtc?: string;             // ✅ renamed to match backend
+  masterTargetSec: number;             // ✅ added
   preteachSec: number;
   walkBufferSec: number;
   baseOfferingSec: number;
@@ -29,32 +41,44 @@ export interface CreateRunDto {
 @Injectable({ providedIn: 'root' })
 export class SignalrService {
   private hub?: signalR.HubConnection;
-  // private connected = false;
   private starting?: Promise<void>;
   private currentRunId?: string;
   private api = environment.apiBaseUrl;
 
-  private serverOffsetMs = 0;
+  private serverOffsetMs = 0;          // localNow - serverNow
   private lastSyncAt = Date.now();
   private pollSub?: Subscription;
 
-  // SignalrService: add an observable for the offset
   private _offsetMs$ = new BehaviorSubject<number>(0);
   readonly offsetMs$ = this._offsetMs$.asObservable();
 
+  // Treat incoming ISO as UTC even if it lacks a timezone
+  private parseServerUtc(iso: string): number {
+    if (!iso) return Date.now();
+    if (/Z|[+\-]\d{2}:\d{2}$/.test(iso)) return Date.parse(iso);
+    return Date.parse(iso + 'Z');
+  }
+
   private setOffsetFromServerIso(iso: string) {
     const serverMs = this.parseServerUtc(iso);
-    this.serverOffsetMs = serverMs - Date.now();   // correct direction
+    // ✅ offset = localNow - serverNow  (so serverNow = localNow - offset)
+    this.serverOffsetMs = Date.now() - serverMs;
     this._offsetMs$.next(this.serverOffsetMs);
   }
 
+  // readonly masterTargetSec = 36 * 60;
 
-  readonly masterTargetSec =36 * 60;
+  // ✅ add this getter (preserves existing references in English view)
+  get masterTargetSec(): number {
+    const s = this.state$.value;
+    return s?.masterTargetSec  ?? 36 * 60; // fallback only until first state comes in
+  }
+
   readonly state$ = new BehaviorSubject<StateDto | null>(null);
 
   constructor(private http: HttpClient) { }
 
-  serverNowMs() { return Date.now() - this.serverOffsetMs; }
+  serverNowMs() { return Date.now() - this.serverOffsetMs; } // ✅ yields server time
   getServerOffsetMs() { return this.serverOffsetMs; }
 
   private async refreshState(runId: string) {
@@ -64,25 +88,10 @@ export class SignalrService {
     this.state$.next(state);
   }
 
-
-  // Treat serverTimeUtc as UTC even if it arrives without a timezone (no 'Z')
-  // Treat incoming ISO as UTC even if it lacks a timezone
-  private parseServerUtc(iso: string): number {
-    if (!iso) return Date.now();
-    if (/Z|[+\-]\d{2}:\d{2}$/.test(iso)) return Date.parse(iso);
-    return Date.parse(iso + 'Z');
-  }
-
-
-
-
   // ==================== START OF Connect =========================//
-
   async connect(runId: string) {
     console.log('[Connect] called with', runId);
-
     this.currentRunId = runId;
-
 
     // Build once
     if (!this.hub) {
@@ -92,7 +101,6 @@ export class SignalrService {
         .build();
       console.log('[Hub] building new connection');
 
-
       console.log('[HubSetup] wiring handlers...');
 
       // ---- wire ALL handlers first ----
@@ -100,6 +108,7 @@ export class SignalrService {
         this.stopPolling();
         this.lastSyncAt = Date.now();
         this.setOffsetFromServerIso(state.serverTimeUtc);
+
         console.log('[OffsetCheck]', {
           serverUtc: state.serverTimeUtc,
           localUtc: new Date().toISOString(),
@@ -110,23 +119,30 @@ export class SignalrService {
         this.state$.next(state);
       });
 
+      // If hub goes away, fall back to polling
       this.hub.onreconnecting(() => this.startPolling(this.currentRunId ?? runId));
 
+      // Re-join group and refresh after reconnect
       this.hub.onreconnected(async () => {
         this.stopPolling();
         const id = this.currentRunId ?? runId;
         if (!id || !this.hub) return;
-        try { await this.hub.invoke('JoinRun', id); } catch (e) { console.error('[Hub] re-JoinRun failed', e); return; }
+        try {
+          await this.hub.invoke('JoinRun', id);
+        } catch (e) {
+          console.error('[Hub] re-JoinRun failed', e);
+          return;
+        }
         await this.refreshState(id);
       });
 
       this.hub.on('Error', (msg: string) => console.error('[Hub Error]', msg));
       this.hub.onclose(() => this.startPolling(this.currentRunId ?? runId));
 
-      // After wiring handlers and before hub.start()
+      // Initial state fetch before starting hub (helps UI paint fast)
       console.log('[SyncOnce] forcing initial state fetch...');
       try {
-        await this.syncOnce(runId);   // reuse that existing helper
+        await this.syncOnce(runId);   // assumes you already have this helper
         console.log('[SyncOnce] complete');
       } catch (err) {
         console.warn('[SyncOnce] failed', err);
@@ -137,12 +153,26 @@ export class SignalrService {
         await this.hub.start();
         console.log('[Hub] connected, waiting for StateUpdated...');
       }
+
       const id = this.currentRunId ?? runId;
       if (id) {
-        try { await this.hub.invoke('JoinRun', id); } catch (e) { console.error('[Hub] initial JoinRun failed', e); }
+        try {
+          await this.hub.invoke('JoinRun', id);
+        } catch (e) {
+          console.error('[Hub] initial JoinRun failed', e);
+        }
         await this.refreshState(id);
         this.stopPolling();
       }
+    } else {
+      // If already built (e.g., navigating to another run), just join & refresh
+      try {
+        await this.hub.invoke('JoinRun', runId);
+      } catch (e) {
+        console.error('[Hub] JoinRun failed', e);
+      }
+      await this.refreshState(runId);
+      this.stopPolling();
     }
   }
   // ==================== END OF Connect =========================//
@@ -197,10 +227,8 @@ export class SignalrService {
     this.pollSub = undefined;
   }
 
-
-
   // --------- Derived streams ----------
-  readonly isLive$ = this.state$.pipe(map(s => !!s?.masterStartAtUtc));
+  readonly isLive$ = this.state$.pipe(map(s => !!s?.masterStartUtc));
 
   readonly lastSyncAgo$ = interval(1000).pipe(
     startWith(0),
@@ -212,9 +240,9 @@ export class SignalrService {
     interval(250).pipe(startWith(0)),
   ]).pipe(
     map(([s]) => {
-      if (!s?.masterStartAtUtc) return 0;
+      if (!s?.masterStartUtc) return 0;
 
-      const startMs = this.parseServerUtc(s.masterStartAtUtc);
+      const startMs = this.parseServerUtc(s.masterStartUtc);
       const serverNow = Date.now() - this.serverOffsetMs;   // live server "now"
       const elapsed = Math.max(0, Math.floor((serverNow - startMs) / 1000));
       const target = this.masterTargetSec;                  // 36*60 for now

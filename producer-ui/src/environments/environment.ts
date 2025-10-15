@@ -1,5 +1,5 @@
 export const environment = {
   production: false,
-  apiBaseUrl: 'https://motel-validity-antique-aqua.trycloudflare.com',
-  hubUrl: ' https://motel-validity-antique-aqua.trycloudflare.com/hubs/serviceSync'
+  apiBaseUrl: 'http://localhost:5272',
+  hubUrl: ' http://localhost:5272/hubs/serviceSync'
 };

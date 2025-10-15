@@ -97,7 +97,7 @@ button.btn, input[type="button"].btn, input[type="submit"].btn {
     .titlebar h2 { margin:0; }
   
     .dot { width:8px; height:8px; border-radius:50%; background:#bbb; display:inline-block; margin-left:6px; }
-    .dot.live { background:#2ecc71; animation:pulse 1s infinite; }
+    .dot.live { background:#2ecc71; animation:pulse 1s infinite;}
     .dot.ended { background:#e53935; animation:none; }
 
    
