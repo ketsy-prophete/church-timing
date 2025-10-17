@@ -1,227 +1,237 @@
 <!-- english-view.component.html -->
-<div style="padding:16px" class="toolbar">
-  <a class="btn btn-secondary" *ngIf="runId as id" [routerLink]="['/runs', id, 'editor']">
-    Open Service Rundown
-  </a>
-</div>
-
-<!-- ======= PRODUCER (renders when state is available) ======= -->
-<ng-container *ngIf="(state$ | async) as s; else editorFallback">
-  <!-- Title / clocks / live status -->
-  <div class="titlebar">
-    <div class="title-left">
-      <h2>English Producer</h2>
-    </div>
-    <div class="clock">
-      <div class="stack">
-        <span class="clock-time">{{ etNow$ | async }} ET</span>
-        <span class="clock-date">{{ etDate$ | async }}</span>
-      </div>
-    </div>
-  </div>
-  <br>
-
-  <!-- Master timer line (shows countdown when started; fallback otherwise) -->
-  <ng-container *ngIf="s.masterStartUtc; else notStarted">
-    <ng-container *ngIf="vmView$ | async as vm">
-      <div class="bar bar-timer">
-        <span class="dot" [class.live]="vm.mc > 0" [class.ended]="vm.mc <= 0"></span>
-
-        <b [class.time-red]="vm.mc <= 0">
-          Master Timer — {{ (vm.mc > 0 ? vm.mc : 0) | mmss }}
-        </b>
-
-        <small class="last-sync">Last sync {{ lastSyncAgo$ | async }}s</small>
-      </div>
-    </ng-container>
-  </ng-container>
-
-  <ng-template #notStarted>
-    <div class="bar bar-timer">
-      <b>Master Timer — not started</b>
-      <small class="last-sync" *ngIf="lastSyncAgo$ | async as sec">Last sync {{ sec }}s</small>
-    </div>
-  </ng-template>
-
-
-
-  <!-- Controls -->
-  <div class="bar">
-    <button class="btn" (click)="startRun()" [disabled]="!!s.masterStartUtc">Start Master</button>
-    <!-- <button (click)="startOffering()" [disabled]="isOfferingLocked(s)">Start Offering</button> -->
-  </div>
-  <br>
-
-  <!-- Spanish status -->
-  <div class="bar">
-    <b>Spanish:</b>
-
-    <!-- Estimated ETA (existing computed version) -->
-    <ng-container *ngIf="spanishEtaSec(s) as eta; else noEta">
-      Estimated ETA {{ eta | mmss }}
-    </ng-container>
-    <ng-template #noEta>Estimated ETA —</ng-template>
-
-    <span style="opacity:.6; margin:0 8px;">|</span>
-
-    <!-- Ended At -->
-    <ng-container *ngIf="spanishEndedAtWallTime() as ended; else noEnd">
-      Ended at {{ ended | date:'h:mm a' }}
-    </ng-container>
-    <ng-template #noEnd>Ended at —</ng-template>
+<div>
+  <div style="padding:16px" class="toolbar">
+    <a class="btn btn-secondary" *ngIf="runId as id" [routerLink]="['/runs', id, 'editor']">
+      Open Service Rundown
+    </a>
   </div>
 
-  <!-- Suggested offering (reserved row; currently blank by design) -->
-  <div class="bar bar-offering" *ngIf="predictedLengthSec(s) as len">
+  <div>
     <br>
     <br>
-  </div>
 
-  <!-- Drift (header only) -->
-  <div class="segments-head">
-    <div class="total-drift">
-      Rundown Total Drift:
-      <span [class.under]="(s.english.runningDriftBeforeOfferingSec ?? 0) < 0"
-        [class.over]="(s.english.runningDriftBeforeOfferingSec ?? 0) > 0">
-        {{ (s.english.runningDriftBeforeOfferingSec ?? 0) | signedmmss }}
-      </span>
-    </div>
-  </div>
+    <!-- ======= PRODUCER (renders when state is available) ======= -->
+    <ng-container *ngIf="(state$ | async) as s; else editorFallback">
+      <!-- Title / clocks / live status -->
+      <div class="titlebar">
+        <div class="title-left">
+          <h2>Timing App — English Service</h2>
+        </div>
+        <div class="clock">
+          <div class="stack">
+            <span class="clock-time">{{ etNow$ | async }} ET</span>
+            <span class="clock-date">{{ etDate$ | async }}</span>
+          </div>
+        </div>
+      </div>
+      <br>
 
-  <!-- Segments table -->
-  <div class="segments-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Segment</th>
-          <th>Planned</th>
-          <th class="actual-cell">Actual</th>
-          <th>Segment Drift</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr *ngFor="let seg of s.english.segments; let i = index; trackBy: trackBySeg">
-          <td>{{ i + 1 }}</td>
-          <td [style.fontWeight]="isActive(i, s.english.segments) ? 600 : 400">{{ seg.name }}</td>
-          <td>{{ seg.plannedSec | mmss }}</td>
-          <td class="actual-cell">
-            <div class="actual-primary">
-              <ng-container *ngIf="seg.completed; else runningOrDash">
-                {{ seg.actualSec | mmss }}
-              </ng-container>
-              <ng-template #runningOrDash>
-                <ng-container *ngIf="isActive(i, s.english.segments); else dash">
-                  {{ activeElapsedSec(i, s.english.segments, s) | mmss }}
-                </ng-container>
-                <ng-template #dash>—</ng-template>
-              </ng-template>
-            </div>
-            <small *ngIf="endedAt(i, s.english.segments) as ended">
-              ended {{ ended | date:'h:mm a' }}
-            </small>
-          </td>
-          <td>
-            <ng-container *ngIf="seg.driftSec != null; else nodrift">
-              <span [class.under]="seg.driftSec < 0" [class.over]="seg.driftSec > 0">
-                {{ seg.driftSec | signedmmss }}
-              </span>
-            </ng-container>
-            <ng-template #nodrift>—</ng-template>
-          </td>
-          <td>
-            <button class="btn" *ngIf="!seg.completed; else done" (click)="completeSegment(seg.id)">Complete</button>
-            <ng-template #done>✓</ng-template>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
+      <!-- Master timer line (shows countdown when started; fallback otherwise) -->
+      <ng-container *ngIf="s.masterStartUtc; else notStarted">
+        <ng-container *ngIf="vmView$ | async as vm">
+          <div class="bar bar-timer">
+            <span class="dot" [class.live]="vm.mc > 0" [class.ended]="vm.mc <= 0"></span>
 
-  <!-- Toasts -->
-  <div class="toast-wrap" aria-live="polite" aria-atomic="true">
-    <div class="toast" *ngFor="let t of etaToasts; trackBy: trackById" [class.delta-early]="t.deltaFromTarget < 0"
-      [class.delta-late]="t.deltaFromTarget > 0">
-      <div><b>Spanish ETA updated</b></div>
-      <div>ETA: {{ t.remSec | mmss }}</div>
-      <small class="stamp">{{ t.wall | date:'h:mm a' }}</small>
-      <button class="toast-close" (click)="closeEtaToast(t.id)">×</button>
-    </div>
+            <b [class.time-red]="vm.mc <= 0">
+              22 min | Master Timer — {{ (vm.mc > 0 ? vm.mc : 0) | mmss }}
+            </b>
 
-    <div class="toast alert" *ngFor="let t of sermonEndToasts; trackBy: trackById">
-      <div><b>Spanish Sermon Ended</b></div>
-      <small class="stamp" *ngIf="t.wall as w"><i>{{ w | date:'h:mm a' }}</i></small>
-      <button class="toast-close" (click)="closeSermonEndToast(t.id)">×</button>
-    </div>
-  </div>
+            <small class="last-sync">Last sync {{ lastSyncAgo$ | async }}s</small>
+          </div>
+        </ng-container>
+      </ng-container>
 
-  <!-- chime -->
-  <audio #etaChime preload="auto" src="assets/eta-chime.mp3"></audio>
-</ng-container>
+      <ng-template #notStarted>
+        <div class="bar bar-timer">
+          <b>Master Timer — not started</b>
+          <small class="last-sync" *ngIf="lastSyncAgo$ | async as sec">Last sync {{ sec }}s</small>
+        </div>
+      </ng-template>
 
-<!-- Producer Rundown (from RundownService) -->
-<section *ngIf="showMiniRundown && (doc$ | async) as doc">
-  <div class="segments-head">
-    <h3>Rundown</h3>
-    <span class="total-drift">Total: {{ totalDurationSec(doc) | mmss }}</span>
-  </div>
-  <div class="segments-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Title</th>
-          <th>Start</th>
-          <th>Dur</th>
-          <th>End</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr *ngFor="let s of doc.segments; let i = index; trackBy: trackById">
-          <td>{{ i + 1 }}</td>
-          <td>{{ s.title || 'Untitled' }}</td>
-          <td>{{ s.startSec | mmss }}</td>
-          <td>{{ s.durationSec | mmss }}</td>
-          <td>{{ (s.startSec + s.durationSec) | mmss }}</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-  <ng-template #loading>Loading…</ng-template>
-</section>
 
-<!-- ================== FALLBACK (Editor) ================== -->
-<ng-template #editorFallback>
-  <ng-container *ngIf="doc$ | async as doc">
-    <div class="segments-wrap" style="margin:12px 0">
+
+      <!-- Controls -->
+      <div class="bar">
+        <button class="btn" (click)="startRun()" [disabled]="!!s.masterStartUtc">Start Master</button>
+        <!-- <button (click)="startOffering()" [disabled]="isOfferingLocked(s)">Start Offering</button> -->
+      </div>
+
+      <!-- Suggested offering (reserved row; currently blank by design) -->
+      <div class="bar bar-offering" *ngIf="predictedLengthSec(s) as len">
+        <br>
+
+      </div>
+
+      <!-- Drift (header only) -->
       <div class="segments-head">
-        <h3>Segments (Editor)</h3>
+        <div class="total-drift">
+          Total Drift from Rundown:
+          <span [class.under]="(s.english.runningDriftBeforeOfferingSec ?? 0) < 0"
+            [class.over]="(s.english.runningDriftBeforeOfferingSec ?? 0) > 0">
+            {{ (s.english.runningDriftBeforeOfferingSec ?? 0) | signedmmss }}
+          </span>
+        </div>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Segment</th>
-            <th>Planned</th>
-            <th>Completion Time</th>
-            <th>Segment Drift</th>
-            <th>Action</th>
-            <th>Ended</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let row of doc.segments; let i = index; trackBy: trackById">
-            <td>{{ i + 1 }}</td>
-            <td>{{ row.title }}</td>
-            <td>{{ row.durationSec | mmss }}</td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td>—</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </ng-container>
-</ng-template>
+
+      <!-- Segments table -->
+      <div class="segments-wrap">
+
+        <!-- Spanish status -->
+        <div class="bar">
+          <b>Spanish Status:</b>
+
+          <!-- Estimated ETA (existing computed version) -->
+          <ng-container *ngIf="spanishEtaSec(s) as eta; else noEta">
+            Estimated ETA {{ eta | mmss }}
+          </ng-container>
+          <ng-template #noEta>Estimated ETA —</ng-template>
+
+          <span style="opacity:.6; margin:0 8px;">|</span>
+
+          <!-- Ended At -->
+          <ng-container *ngIf="spanishEndedAtWallTime() as ended; else noEnd">
+            Ended at {{ ended | date:'h:mm a' }}
+          </ng-container>
+          <ng-template #noEnd>Ended at —</ng-template>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Segment</th>
+              <th>Planned</th>
+              <th class="actual-cell">Actual</th>
+              <th>Segment Drift</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let seg of s.english.segments; let i = index; trackBy: trackBySeg">
+              <td>{{ i + 1 }}</td>
+              <td [style.fontWeight]="isActive(i, s.english.segments) ? 600 : 400">{{ seg.name }}</td>
+              <td>{{ seg.plannedSec | mmss }}</td>
+              <td class="actual-cell">
+                <div class="actual-primary">
+                  <ng-container *ngIf="seg.completed; else runningOrDash">
+                    {{ seg.actualSec | mmss }}
+                  </ng-container>
+                  <ng-template #runningOrDash>
+                    <ng-container *ngIf="isActive(i, s.english.segments); else dash">
+                      {{ activeElapsedSec(i, s.english.segments, s) | mmss }}
+                    </ng-container>
+                    <ng-template #dash>—</ng-template>
+                  </ng-template>
+                </div>
+                <small *ngIf="endedAt(i, s.english.segments) as ended">
+                  ended {{ ended | date:'h:mm a' }}
+                </small>
+              </td>
+              <td>
+                <ng-container *ngIf="seg.driftSec != null; else nodrift">
+                  <span [class.under]="seg.driftSec < 0" [class.over]="seg.driftSec > 0">
+                    {{ seg.driftSec | signedmmss }}
+                  </span>
+                </ng-container>
+                <ng-template #nodrift>—</ng-template>
+              </td>
+              <td>
+                <button class="btn" *ngIf="!seg.completed; else done"
+                  (click)="completeSegment(seg.id)">Complete</button>
+                <ng-template #done>✓</ng-template>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+
+      </div>
+
+      <!-- Toasts -->
+      <div class="toast-wrap" aria-live="polite" aria-atomic="true">
+        <div class="toast" *ngFor="let t of etaToasts; trackBy: trackById" [class.delta-early]="t.deltaFromTarget < 0"
+          [class.delta-late]="t.deltaFromTarget > 0">
+          <div><b>Spanish ETA updated</b></div>
+          <div>ETA: {{ t.remSec | mmss }}</div>
+          <small class="stamp">{{ t.wall | date:'h:mm a' }}</small>
+          <button class="toast-close" (click)="closeEtaToast(t.id)">×</button>
+        </div>
+
+        <div class="toast alert" *ngFor="let t of sermonEndToasts; trackBy: trackById">
+          <div><b>Spanish Sermon Ended</b></div>
+          <small class="stamp" *ngIf="t.wall as w"><i>{{ w | date:'h:mm a' }}</i></small>
+          <button class="toast-close" (click)="closeSermonEndToast(t.id)">×</button>
+        </div>
+      </div>
+
+      <!-- chime -->
+      <audio #etaChime preload="auto" src="assets/eta-chime.mp3"></audio>
+    </ng-container>
+
+    <!-- Producer Rundown (from RundownService) -->
+    <section *ngIf="showMiniRundown && (doc$ | async) as doc">
+      <div class="segments-head">
+        <h3>Rundown</h3>
+        <span class="total-drift">Total: {{ totalDurationSec(doc) | mmss }}</span>
+      </div>
+      <div class="segments-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Title</th>
+              <th>Start</th>
+              <th>Dur</th>
+              <th>End</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let s of doc.segments; let i = index; trackBy: trackById">
+              <td>{{ i + 1 }}</td>
+              <td>{{ s.title || 'Untitled' }}</td>
+              <td>{{ s.startSec | mmss }}</td>
+              <td>{{ s.durationSec | mmss }}</td>
+              <td>{{ (s.startSec + s.durationSec) | mmss }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <ng-template #loading>Loading…</ng-template>
+    </section>
+
+    <!-- ================== FALLBACK (Editor) ================== -->
+    <ng-template #editorFallback>
+      <ng-container *ngIf="doc$ | async as doc">
+        <div class="segments-wrap" style="margin:12px 0">
+          <div class="segments-head">
+            <h3>Segments (Editor)</h3>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Segment</th>
+                <th>Planned</th>
+                <th>Completion Time</th>
+                <th>Segment Drift</th>
+                <th>Action</th>
+                <th>Ended</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let row of doc.segments; let i = index; trackBy: trackById">
+                <td>{{ i + 1 }}</td>
+                <td>{{ row.title }}</td>
+                <td>{{ row.durationSec | mmss }}</td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </ng-container>
+    </ng-template>
+  </div>
+</div>

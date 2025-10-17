@@ -1,6 +1,6 @@
 <div style="padding:16px; font-family:system-ui">
   <div class="titlebar">
-    <h2>Spanish Producer</h2>
+    <h2>Timing App — Spanish Service</h2>
     <div class="clock">
       <div class="clock-time">{{ etNow$ | async }} ET</div>
       <div class="clock-date">{{ etDate$ | async }}</div>
@@ -13,7 +13,7 @@
       <span class="dot" [class.live]="vm.mc > 0" [class.ended]="vm.mc <= 0"></span>
 
       <b [class.time-red]="vm.mc <= 0">
-        Master Timer – {{ (vm.mc > 0 ? vm.mc : 0) | mmss }}
+        22 min | Master Timer — {{ (vm.mc > 0 ? vm.mc : 0) | mmss }}
       </b>
 
       <small *ngIf="(hub.lastSyncAgo$ | async) as secs">
@@ -29,8 +29,9 @@
     </ng-template>
   </div>
 
+  <br>
   <div *ngIf="state as s">
-    <h3 style="margin-top:12px">Completed in English</h3>
+    <h3 style="margin: 12px 0px 0px 0px;">Completed in Main</h3>
     <div class="segments-wrap">
       <table>
         <tr>
@@ -70,17 +71,16 @@
             title="Enter minutes and seconds like 1:30" (keyup.enter)="setSpanishEtaFromText(eta.value)">
         </label>
 
-        <button class="btn" type="button" style="margin-left:12px" (click)="setSpanishEtaFromText(eta.value)"
-          [disabled]="!state?.masterStartUtc || !mmssValid(eta.value)">
+        <button class="btn" type="button" style="margin-left:12px" (click)="setSpanishEtaFromText(eta.value)">
           Send ETA
         </button>
 
         <span style="margin-left:12px; opacity:.95">
-          <span style="color:#4b62ad; font-weight:700; font-size:13px">
+          <span style="color:#0e0d0d; font-weight:700; font-size:13px">
             Current Time Left:
           </span>
           <ng-container *ngIf="currentSpanishRemainingSec() as rem; else noneEta">
-            <span style="color:#4b62ad; font-weight:700; font-size:13px">
+            <span style="color:#ff0000; font-weight:700; font-size:13px">
               {{ rem | mmss }}
             </span>
           </ng-container>
@@ -101,7 +101,8 @@
 
       <!-- LINE 4: Sermon End button -->
       <div style="margin-top:6px">
-        <button class="btn" (click)="sermonEnd()" [disabled]="sermonEndClicked || (state?.spanish?.sermonEndedAtSec ?? 0) > 0">
+        <button class="btn" (click)="sermonEnd()"
+          [disabled]="sermonEndClicked || (state?.spanish?.sermonEndedAtSec ?? 0) > 0">
           Sermon End
         </button>
       </div>

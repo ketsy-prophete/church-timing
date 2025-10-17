@@ -66,12 +66,31 @@ export class SignalrService {
     this._offsetMs$.next(this.serverOffsetMs);
   }
 
+  // inside class SignalrService
+  private normalizeDrift(state: StateDto): StateDto {
+    return {
+      ...state,
+      english: {
+        ...state.english,
+        segments: state.english.segments.map(seg => ({
+          ...seg,
+          driftSec: seg.driftSec == null ? seg.driftSec : -seg.driftSec
+        })),
+        runningDriftBeforeOfferingSec:
+          state.english.runningDriftBeforeOfferingSec == null
+            ? state.english.runningDriftBeforeOfferingSec
+            : -state.english.runningDriftBeforeOfferingSec
+      }
+    };
+  }
+
+
   // readonly masterTargetSec = 36 * 60;
 
   // ✅ add this getter (preserves existing references in English view)
   get masterTargetSec(): number {
     const s = this.state$.value;
-    return s?.masterTargetSec  ?? 36 * 60; // fallback only until first state comes in
+    return s?.masterTargetSec ?? 36 * 60; // fallback only until first state comes in
   }
 
   readonly state$ = new BehaviorSubject<StateDto | null>(null);
@@ -85,7 +104,7 @@ export class SignalrService {
     const state = await firstValueFrom(this.http.get<StateDto>(`${this.api}/api/runs/${runId}/state`));
     this.setOffsetFromServerIso(state.serverTimeUtc);
     this.lastSyncAt = Date.now();
-    this.state$.next(state);
+    this.state$.next(this.normalizeDrift(state));
   }
 
   // ==================== START OF Connect =========================//
@@ -116,7 +135,7 @@ export class SignalrService {
           offsetMin: (this.serverOffsetMs / 60000).toFixed(2)
         });
 
-        this.state$.next(state);
+        this.state$.next(this.normalizeDrift(state));
       });
 
       // If hub goes away, fall back to polling
@@ -184,7 +203,7 @@ export class SignalrService {
     const state = await firstValueFrom(this.http.get<StateDto>(url));
     this.setOffsetFromServerIso(state.serverTimeUtc);
     this.lastSyncAt = Date.now();
-    this.state$.next(state);
+    this.state$.next(this.normalizeDrift(state));
   }
 
   // ==================== END OF SyncOnce =========================//
@@ -217,7 +236,7 @@ export class SignalrService {
       if (!s) return;
       this.setOffsetFromServerIso(s.serverTimeUtc);
       this.lastSyncAt = Date.now();
-      this.state$.next(s);
+      this.state$.next(this.normalizeDrift(s));
     });
   }
 

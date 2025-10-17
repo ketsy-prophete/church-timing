@@ -47,7 +47,12 @@
         [style.--stripe]="g.value.color || '#5b9'">
 
 
-
+        <!-- Title -->
+        <div class="cell">
+          <label class="cell-label" [attr.for]="'title-' + g.controls.id.value">Title</label>
+          <input class="title" [id]="'title-' + g.controls.id.value" type="text" formControlName="title"
+            placeholder="e.g., Worship Set">
+        </div>
 
         <!-- Duration mm:ss -->
         <div class="mmss">
@@ -58,43 +63,38 @@
         </div>
 
         <!-- Start mm:ss -->
-        <div class="mmss">
+        <!-- <div class="mmss">
           <input type="number" [value]="minOf(g.controls.startSec.value)" (input)="setStartMin(i, $event)" min="0" />
           :
           <input type="number" [value]="secOf(g.controls.startSec.value)" (input)="setStartSec(i, $event)" min="0"
             max="59" />
-        </div>
+        </div> -->
 
 
 
         <div class="idx">{{ i + 1 }}</div>
 
-        <!-- Title -->
-        <div class="cell">
-          <label class="cell-label" [attr.for]="'title-' + g.controls.id.value">Title</label>
-          <input class="title" [id]="'title-' + g.controls.id.value" type="text" formControlName="title"
-            placeholder="e.g., Worship Set">
-        </div>
+
 
         <!-- Start -->
-        <div class="cell start">
+        <!-- <div class="cell start">
           <label class="cell-label" [attr.for]="'start-' + g.controls.id.value">Start (sec)</label>
           <input class="num" [id]="'start-' + g.controls.id.value" type="number" formControlName="startSec" min="0"
             [attr.aria-describedby]="'start-hint-' + g.controls.id.value">
           <small class="muted" [id]="'start-hint-' + g.controls.id.value">
             {{ g.controls.startSec.value | mmss }}
           </small>
-        </div>
+        </div> -->
 
         <!-- Duration -->
-        <div class="cell dur">
+        <!-- <div class="cell dur">
           <label class="cell-label" [attr.for]="'dur-' + g.controls.id.value">Duration (sec)</label>
           <input class="num" [id]="'dur-' + g.controls.id.value" type="number" formControlName="durationSec" min="1"
             [attr.aria-describedby]="'dur-hint-' + g.controls.id.value">
           <small class="muted" [id]="'dur-hint-' + g.controls.id.value">
             {{ g.controls.durationSec.value | mmss }}
           </small>
-        </div>
+        </div> -->
 
         <!-- End (read-only) -->
         <div class="cell end">

@@ -1,3 +1,10 @@
+.toolbar {
+  display: flex;
+  justify-content: center; /* push content to the right */
+         /* move inline style here if you like */
+}
+
+
 /* Turn <a> into a button*/
 a.btn {
   display: inline-block;
@@ -14,7 +21,7 @@ a.btn {
 /* Control link colors (no purple visited) */
 a.btn:link,
 a.btn:visited {
-  color: #020b1d;                  
+  color: #031d02;                  
 }
 
 /* Secondary variant */
@@ -88,7 +95,7 @@ button.btn, input[type="button"].btn, input[type="submit"].btn {
 
 
 
-    .bar { display:flex; gap:12px; align-items:center; margin:8px 0; }
+    .bar { display:flex; gap:12px; align-items:center; margin:10px 12px; }
     table { border-collapse:collapse; }
     th, td { padding:6px 8px; border:1px solid #ccc; }
 
@@ -117,18 +124,18 @@ button.btn, input[type="button"].btn, input[type="submit"].btn {
       line-height:1.15;
     }
     .clock-time { font-weight:700; font-size:20px; line-height:1; }
-    .clock-date { font-weight:500; font-size:12px; opacity:.8; line-height:1.2; }
+    .clock-date { font-weight:500; font-size:12px; opacity:.8; line-height:1.99; }
     .last-sync  { white-space:nowrap; opacity:.8; align-self:flex-end; }
 
     @keyframes pulse { 0%{opacity:.4} 50%{opacity:1} 100%{opacity:.4} }
 
     /* ---- Segments table / states ---- */
-    .segments-wrap { display:inline-block; border:1px solid #d6d6d6; border-radius:12px; overflow:hidden; background:#fff;
+    .segments-wrap { display:inline-block; border:4px solid #d6d6d6; border-radius:12px; overflow:hidden; background:#fff;
 }
     .segments-wrap table { width:auto; }
     .segments-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin:16px 0 8px; }
     .segments-head h3 { margin:0; }
-    .total-drift { font-weight:600; white-space:nowrap; }
+    .total-drift { font-weight:700; white-space:nowrap; }
 
     .time-red { color:#e53935; }
     .over { color:#000000; }
