@@ -29,7 +29,7 @@
       <!-- Master timer line (shows countdown when started; fallback otherwise) -->
       <ng-container *ngIf="s.masterStartUtc; else notStarted">
         <ng-container *ngIf="vmView$ | async as vm">
-          <div class="bar bar-timer">
+          <div class="bar-timer">
             <span class="dot" [class.live]="vm.mc > 0" [class.ended]="vm.mc <= 0"></span>
 
             <b [class.time-red]="vm.mc <= 0">
@@ -51,7 +51,7 @@
 
 
       <!-- Controls -->
-      <div class="bar">
+      <div class="start">
         <button class="btn" (click)="startRun()" [disabled]="!!s.masterStartUtc">Start Master</button>
         <!-- <button (click)="startOffering()" [disabled]="isOfferingLocked(s)">Start Offering</button> -->
       </div>
@@ -113,20 +113,23 @@
               <td>{{ seg.plannedSec | mmss }}</td>
               <td class="actual-cell">
                 <div class="actual-primary">
-                  <ng-container *ngIf="seg.completed; else runningOrDash">
+                  <ng-container *ngIf="seg.completed; else maybeLive">
                     {{ seg.actualSec | mmss }}
                   </ng-container>
-                  <ng-template #runningOrDash>
+
+                  <ng-template #maybeLive>
                     <ng-container *ngIf="isActive(i, s.english.segments); else dash">
-                      {{ activeElapsedSec(i, s.english.segments, s) | mmss }}
+                      {{ liveActualSec(seg, s.english.segments) | mmss }}
                     </ng-container>
                     <ng-template #dash>—</ng-template>
                   </ng-template>
                 </div>
+
                 <small *ngIf="endedAt(i, s.english.segments) as ended">
                   ended {{ ended | date:'h:mm a' }}
                 </small>
               </td>
+
               <td>
                 <ng-container *ngIf="seg.driftSec != null; else nodrift">
                   <span [class.under]="seg.driftSec < 0" [class.over]="seg.driftSec > 0">

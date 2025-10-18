@@ -26,6 +26,11 @@ table.completed-english th, table.completed-english td{
   font-weight:600;
 }
 
+/* .actual-stack { display: inline-flex; flex-direction: column; line-height: 1.05; }
+.actual-main { font-variant-numeric: tabular-nums; }
+.actual-planned { font-size: 12px; opacity: .75; } */
+
+
 /* Base button (works for <a>, <button>, <input>) */
 .btn{
   display:inline-block;

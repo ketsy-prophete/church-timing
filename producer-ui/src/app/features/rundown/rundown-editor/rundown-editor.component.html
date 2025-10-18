@@ -46,6 +46,7 @@
       <div class="row" *ngFor="let g of segmentsArray.controls; let i = index; trackBy: trackBySegment" [formGroup]="g"
         [style.--stripe]="g.value.color || '#5b9'">
 
+        <div class="idx">------Segment {{ i + 1 }}------</div>
 
         <!-- Title -->
         <div class="cell">
@@ -69,11 +70,6 @@
           <input type="number" [value]="secOf(g.controls.startSec.value)" (input)="setStartSec(i, $event)" min="0"
             max="59" />
         </div> -->
-
-
-
-        <div class="idx">{{ i + 1 }}</div>
-
 
 
         <!-- Start -->
@@ -108,6 +104,9 @@
           <button type="button" title="Down" (click)="moveDown(i)">▼</button>
           <button type="button" title="Delete" (click)="remove(i)">✕</button>
         </div>
+          <br>
+          <br>
+
       </div>
 
       <!-- Hidden Import in v1 -->

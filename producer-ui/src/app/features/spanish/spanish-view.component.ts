@@ -269,4 +269,76 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
   displayDurDoc(seg: RundownSegment): number {
     return seg.durationSec ?? 0;
   }
+
+  // Returns fixed actual seconds for a completed segment; 0 otherwise.
+  actualFixedSec(seg: {
+    actualSec?: number;
+    completed?: boolean;
+    actualStartUtc?: string;
+    actualStopUtc?: string;
+  }): number {
+    // Prefer backend-computed actualSec if present
+    if (typeof seg.actualSec === 'number') return Math.max(0, seg.actualSec);
+
+    // Fallback: derive from UTC instants if they exist and the segment is completed
+    if (seg.completed && seg.actualStartUtc && seg.actualStopUtc) {
+      const start = Date.parse(seg.actualStartUtc);
+      const stop = Date.parse(seg.actualStopUtc);
+      if (isFinite(start) && isFinite(stop)) {
+        return Math.max(0, Math.floor((stop - start) / 1000));
+      }
+    }
+    return 0; // not started or still in progress
+  }
+
+
+  // // ⏱️ Returns the seconds to display in the Actual cell for a segment
+  // actualDisplaySec(seg: {
+  //   actualStartUtc?: string;
+  //   actualStopUtc?: string;
+  //   completed?: boolean;
+  // }): number {
+  //   const start = seg.actualStartUtc ? Date.parse(seg.actualStartUtc) : 0;
+  //   const stop = seg.actualStopUtc ? Date.parse(seg.actualStopUtc) : 0;
+
+  //   // Completed → fixed actual duration
+  //   if (seg.completed && start && stop) {
+  //     return Math.max(0, Math.floor((stop - start) / 1000));
+  //   }
+
+  //   // In-progress → live ticking from its own start (starts at 0 when prior segment completes)
+  //   if (!seg.completed && start) {
+  //     const nowMs = this.hub.serverNowMs(); // you already use this on English side
+  //     return Math.max(0, Math.floor((nowMs - start) / 1000));
+  //   }
+
+  //   // Not started
+  //   return 0;
+  // }
+
+
+  // // ⏱️ Returns the seconds to display in the Actual cell for a segment
+  // actualDisplaySec(seg: {
+  //   actualStartUtc?: string;
+  //   actualStopUtc?: string;
+  //   completed?: boolean;
+  // }): number {
+  //   const start = seg.actualStartUtc ? Date.parse(seg.actualStartUtc) : 0;
+  //   const stop = seg.actualStopUtc ? Date.parse(seg.actualStopUtc) : 0;
+
+  //   // Completed → fixed actual duration
+  //   if (seg.completed && start && stop) {
+  //     return Math.max(0, Math.floor((stop - start) / 1000));
+  //   }
+
+  //   // In-progress → live ticking from its own start (starts at 0 when prior segment completes)
+  //   if (!seg.completed && start) {
+  //     const nowMs = this.hub.serverNowMs(); // you already use this on English side
+  //     return Math.max(0, Math.floor((nowMs - start) / 1000));
+  //   }
+
+  //   // Not started
+  //   return 0;
+  // }
+
 }

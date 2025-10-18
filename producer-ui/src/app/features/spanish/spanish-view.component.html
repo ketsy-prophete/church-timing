@@ -38,8 +38,8 @@
           <tr>
             <th>#</th>
             <th>Segment</th>
-            <th>Planned</th>
-            <th>Timer</th>
+            <!-- <th>Planned</th> -->
+            <th>Actual</th>
             <th>Total Drift</th>
             <th>Status</th>
             <th>End Time</th>
@@ -50,11 +50,35 @@
             [class.highlight]="seg.id === lastCompletedId">
             <td>{{ seg.order ?? (idx + 1) }}</td>
             <td>{{ seg.name }}</td>
-            <td>{{ seg.plannedSec | mmss }}</td>
-            <td>
+            <!-- <td>{{ seg.plannedSec | mmss }}</td> -->
+
+            <!-- <td>
               <ng-container *ngIf="seg.completed; else dash"> {{ seg.actualSec | mmss }} </ng-container>
               <ng-template #dash>—</ng-template>
+            </td> -->
+
+            <!-- <td class="actual-cell">
+              <div class="actual-stack">
+                <span class="actual-main">
+                  {{ actualDisplaySec(seg) | mmss }}
+                </span>
+                <small class="actual-planned">
+                  /{{ seg.plannedSec | mmss }}
+                </small>
+              </div>
+            </td> -->
+
+            <!-- Cell -->
+            <td class="actual-cell">
+              <div class="actual-stack">
+                <span class="actual-main">
+                  {{ actualFixedSec(seg) | mmss }}
+                </span>
+                <small class="actual-planned">/{{ seg.plannedSec | mmss }}</small>
+              </div>
             </td>
+
+
             <!-- NEW: running/cumulative drift -->
             <td>
               <ng-container *ngIf="seg.running !== null">

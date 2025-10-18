@@ -1,7 +1,11 @@
 .toolbar {
   display: flex;
-  justify-content: center; /* push content to the right */
+  justify-content: right; /* push content to the right */
          /* move inline style here if you like */
+}
+
+.start {
+  margin-top: 8px;
 }
 
 

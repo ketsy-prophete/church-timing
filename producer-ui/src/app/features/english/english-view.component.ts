@@ -350,23 +350,41 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
     for (let i = 0; i < idx; i++) if (!segs[i].completed) return false;
     return !segs[idx].completed;
   }
+  // activeElapsedSec(idx: number, segs: any[], s: ViewStateDto): number {
+  //   let prevActual = 0;
+  //   for (let i = idx - 1; i >= 0; i--) {
+  //     const a = segs[i].actualSec;
+  //     if (segs[i].completed && typeof a === 'number') { prevActual = a; break; }
+  //   }
+  //   const masterStartMs = Date.parse(s.masterStartUtc!);
+  //   const segStartMs = masterStartMs + prevActual * 1000;
+  //   const nowMs = this.hub.serverNowMs();
+  //   return Math.max(0, Math.floor((nowMs - segStartMs) / 1000));
+  // }
   activeElapsedSec(idx: number, segs: any[], s: ViewStateDto): number {
-    let prevActual = 0;
-    for (let i = idx - 1; i >= 0; i--) {
-      const a = segs[i].actualSec;
-      if (segs[i].completed && typeof a === 'number') { prevActual = a; break; }
-    }
-    const masterStartMs = Date.parse(s.masterStartUtc!);
-    const segStartMs = masterStartMs + prevActual * 1000;
+    if (!s?.masterStartUtc) return 0;
+    const masterStartMs = Date.parse(s.masterStartUtc);
+    const priorActualSec = this.sumActualBefore(idx, segs);       // ✅ sum, not “last completed”
+    const segStartMs = masterStartMs + priorActualSec * 1000;
     const nowMs = this.hub.serverNowMs();
     return Math.max(0, Math.floor((nowMs - segStartMs) / 1000));
   }
+
+  // endedAt(idx: number, segs: any[]): Date | null {
+  //   if (!this.state?.masterStartUtc || !segs[idx]?.completed) return null;
+  //   const endSec = segs[idx].actualSec ?? 0;
+  //   const endMs = Date.parse(this.state.masterStartUtc) + endSec * 1000;
+  //   return new Date(endMs);
+  // }
   endedAt(idx: number, segs: any[]): Date | null {
     if (!this.state?.masterStartUtc || !segs[idx]?.completed) return null;
-    const endSec = segs[idx].actualSec ?? 0;
-    const endMs = Date.parse(this.state.masterStartUtc) + endSec * 1000;
+
+    // If you later add actualStopUtc, prefer that here.
+    const endAbsSec = this.sumActualThrough(idx, segs);           // ✅ cumulative up to this row
+    const endMs = Date.parse(this.state.masterStartUtc) + endAbsSec * 1000;
     return new Date(endMs);
   }
+
   // ✅ Add these two helpers anywhere inside the class:
   masterCountdownSec(s: ViewStateDto | null): number | null {
     if (!s?.masterStartUtc) return null;
@@ -376,8 +394,43 @@ export class EnglishViewComponent implements OnInit, OnDestroy {
     return s.masterTargetSec - elapsed; // can be <= 0
   }
 
+  liveActualSec(
+    seg: { id: string; order: number; completed?: boolean; actualSec?: number },
+    segs: Array<{ id: string; order: number; completed?: boolean; actualSec?: number }>
+  ): number {
+    if (seg.completed) return seg.actualSec ?? 0;
+
+    // allow ticking ONLY for the first incomplete row
+    const firstOpen = [...segs].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).find(s => !s.completed);
+    if (!firstOpen || firstOpen.id !== seg.id) return 0; // not current → don't tick
+
+    const start = this.state?.masterStartUtc;
+    if (!start) return 0;
+
+    const elapsed = Math.max(0, Math.floor((this.hub.serverNowMs() - Date.parse(start)) / 1000));
+    const order = seg.order ?? 0;
+    const priorMark = segs
+      .filter(s => (s.order ?? 0) < order && s.completed)
+      .reduce((t, s) => t + (s.actualSec ?? 0), 0);
+
+    return Math.max(0, elapsed - priorMark); // current row counts up from 00:00
+  }
+
+
+
   plannedMarks(segs: { plannedSec: number }[]): number[] {
     let acc = 0;
     return (segs ?? []).map(s => (acc += (s?.plannedSec ?? 0)));
   }
+
+  private sumActualBefore(idx: number, segs: Array<{ completed?: boolean; actualSec?: number }>): number {
+    let total = 0;
+    for (let i = 0; i < idx; i++) total += (segs[i]?.completed ? (segs[i]?.actualSec ?? 0) : 0);
+    return total;
+  }
+
+  private sumActualThrough(idx: number, segs: Array<{ completed?: boolean; actualSec?: number }>): number {
+    return this.sumActualBefore(idx, segs) + (segs[idx]?.completed ? (segs[idx]?.actualSec ?? 0) : 0);
+  }
+
 }
