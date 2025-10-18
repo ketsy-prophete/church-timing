@@ -31,36 +31,50 @@
 
   <br>
   <div *ngIf="state as s">
-    <h3 style="margin: 12px 0px 0px 0px;">Completed in Main</h3>
+    <h3 style="margin: 12px 0 0">Completed in Main</h3>
     <div class="segments-wrap">
       <table>
-        <tr>
-          <th>#</th>
-          <th>Segment</th>
-          <th>Segment Drift</th>
-          <th>Total Drift</th>
-          <th>Status</th>
-          <th>End Time</th>
-        </tr>
-
-        <tr *ngFor="let row of completedEnglishWithRunning; let idx = index; trackBy: trackBySegWrap"
-          [class.highlight]="row.seg.id === lastCompletedId">
-          <td>{{ (row.seg.order ?? (idx + 1)) }}</td>
-          <td>{{ row.seg.name }}</td>
-          <td>{{ (row.seg.driftSec ?? 0) | signedmmss }}</td>
-          <td [style.color]="row.running > 4 ? 'black' : row.running < -4 ? 'red' : 'inherit'">
-            {{ row.running | signedmmss:true }}
-          </td>
-          <td>Complete</td>
-          <td>
-            <ng-container *ngIf="endedAtFor(row.seg.id, completedEnglishSorted) as endedAt; else noEnded">
-              {{ endedAt | date:'h:mm a':'America/New_York' }}
-            </ng-container>
-            <ng-template #noEnded>—</ng-template>
-          </td>
-        </tr>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Segment</th>
+            <th>Planned</th>
+            <th>Timer</th>
+            <th>Total Drift</th>
+            <th>Status</th>
+            <th>End Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let seg of englishSegmentsWithRunning; let idx = index; trackBy: trackBySeg"
+            [class.highlight]="seg.id === lastCompletedId">
+            <td>{{ seg.order ?? (idx + 1) }}</td>
+            <td>{{ seg.name }}</td>
+            <td>{{ seg.plannedSec | mmss }}</td>
+            <td>
+              <ng-container *ngIf="seg.completed; else dash"> {{ seg.actualSec | mmss }} </ng-container>
+              <ng-template #dash>—</ng-template>
+            </td>
+            <!-- NEW: running/cumulative drift -->
+            <td>
+              <ng-container *ngIf="seg.running !== null">
+                <span [class.over]="seg.running > 0" [class.under]="seg.running < 0">
+                  {{ seg.running | signedmmss }}
+                </span>
+              </ng-container>
+            </td>
+            <td>{{ seg.completed ? 'Complete' : '—' }}</td>
+            <td>
+              <ng-container *ngIf="endedAtFor(seg.id, englishSegmentsSorted) as endedAt; else noEnded">
+                {{ endedAt | date:'h:mm a':'America/New_York' }}
+              </ng-container>
+              <ng-template #noEnded>—</ng-template>
+            </td>
+          </tr>
+        </tbody>
       </table>
     </div>
+
 
     <!-- Bottom controls -->
     <div style="margin-top:16px">

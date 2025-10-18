@@ -188,6 +188,25 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   }
 
+  // NEW: all English segments, sorted by order (completed + not completed)
+  get englishSegmentsSorted(): EnglishSeg[] {
+    return ((this.state?.english?.segments ?? []) as unknown as EnglishSeg[])
+      .slice()
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }
+
+  // Running total drift per row (completed rows add to the sum; others show current total)
+  get englishSegmentsWithRunning(): Array<EnglishSeg & { running: number | null }> {
+    const segs = this.englishSegmentsSorted;
+    let sum = 0;
+    return segs.map(seg => {
+      if (seg.completed) sum += Number(seg.driftSec ?? 0);
+      return { ...seg, running: seg.completed ? sum : null };
+    });
+  }
+
+
+
   private updateHighlight(s: StateDto | null) {
     if (!s?.english?.segments) return;
     const completed = (s.english.segments as unknown as EnglishSeg[]).filter((x) => x.completed);
@@ -197,6 +216,14 @@ export class SpanishViewComponent implements OnInit, OnDestroy {
     if (newlyCompleted.length > 0) {
       newlyCompleted.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       this.lastCompletedId = newlyCompleted[newlyCompleted.length - 1].id;
+    }
+    // If there are newly completed segments, pick the latest; otherwise, on first load, fall back to the highest-order completed segment.
+    const source = newlyCompleted.length > 0 ? newlyCompleted : completed;
+    if (source.length > 0) {
+      source.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      this.lastCompletedId = source[source.length - 1].id;
+    } else {
+      this.lastCompletedId = null;
     }
     this.prevCompletedIds = completedIds;
   }
