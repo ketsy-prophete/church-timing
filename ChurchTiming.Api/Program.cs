@@ -210,37 +210,76 @@ async (Guid id, SegmentUpsertDto[] payload, AppDbContext db, IHubContext<Service
     return Results.Ok();
 });
 
-// Complete a segment (idempotent)
+// took this out to fix actuals column displaying cumulative times instead of segment durations
 // Route: note :int on segmentId
+// Complete a segment (idempotent)
+
+// app.MapPost("/api/runs/{id:guid}/english/segments/{segmentId:int}/complete",
+// async (Guid id, int segmentId, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
+// {
+//     var run = await db.Runs.Include(r => r.Segments).FirstOrDefaultAsync(r => r.Id == id);
+//     if (run is null || run.MasterStartAtUtc is null) return Results.BadRequest("Run not live or not found");
+
+//     var seg = run.Segments.FirstOrDefault(s => s.Id == segmentId); // int == int ✅
+//     if (seg is null) return Results.NotFound();
+
+//     if (!seg.Completed)
+//     {
+//         seg.Completed = true;
+//         seg.ActualSec ??= (int)Math.Round((DateTime.UtcNow - AsUtc(run.MasterStartAtUtc.Value)).TotalSeconds);
+//         // ---- compute DriftSec (duration - planned) ----
+//         var prev = run.Segments
+//             .Where(s => s.Order < seg.Order && s.Completed && s.ActualSec != null)
+//             .OrderByDescending(s => s.Order)
+//             .FirstOrDefault();
+//         var prevActual = prev?.ActualSec ?? 0;
+//         // var duration = Math.Max(0, (seg.ActualSec ?? 0) - prevActual);
+//         // seg.DriftSec = duration - seg.PlannedSec;
+//         var duration = Math.Max(0, (seg.ActualSec ?? 0) - prevActual);
+//         seg.DriftSec = seg.PlannedSec - duration;
+
+//         await db.SaveChangesAsync();
+//         await hub.Clients.Group(id.ToString()).StateUpdated(BuildState(run));
+//     }
+//     return Results.Ok();
+// });
+
+
+// Complete a segment (idempotent, stores per-segment duration)
 app.MapPost("/api/runs/{id:guid}/english/segments/{segmentId:int}/complete",
 async (Guid id, int segmentId, AppDbContext db, IHubContext<ServiceSyncHub, ISyncClient> hub) =>
 {
     var run = await db.Runs.Include(r => r.Segments).FirstOrDefaultAsync(r => r.Id == id);
-    if (run is null || run.MasterStartAtUtc is null) return Results.BadRequest("Run not live or not found");
+    if (run is null || run.MasterStartAtUtc is null)
+        return Results.BadRequest("Run not live or not found");
 
-    var seg = run.Segments.FirstOrDefault(s => s.Id == segmentId); // int == int ✅
+    var seg = run.Segments.FirstOrDefault(s => s.Id == segmentId);
     if (seg is null) return Results.NotFound();
 
-    if (!seg.Completed)
-    {
-        seg.Completed = true;
-        seg.ActualSec ??= (int)Math.Round((DateTime.UtcNow - AsUtc(run.MasterStartAtUtc.Value)).TotalSeconds);
-        // ---- compute DriftSec (duration - planned) ----
-        var prev = run.Segments
-            .Where(s => s.Order < seg.Order && s.Completed && s.ActualSec != null)
-            .OrderByDescending(s => s.Order)
-            .FirstOrDefault();
-        var prevActual = prev?.ActualSec ?? 0;
-        // var duration = Math.Max(0, (seg.ActualSec ?? 0) - prevActual);
-        // seg.DriftSec = duration - seg.PlannedSec;
-        var duration = Math.Max(0, (seg.ActualSec ?? 0) - prevActual);
-        seg.DriftSec = seg.PlannedSec - duration;
+    // Idempotent: if already completed, just echo current state
+    if (seg.Completed) return Results.Ok(BuildState(run));
 
-        await db.SaveChangesAsync();
-        await hub.Clients.Group(id.ToString()).StateUpdated(BuildState(run));
-    }
-    return Results.Ok();
+    // Elapsed since master start (seconds)
+    var nowSec = (int)Math.Round((DateTime.UtcNow - AsUtc(run.MasterStartAtUtc.Value)).TotalSeconds);
+
+    // priorMark as an int (handles null ActualSec safely)
+    var priorMark = run.Segments
+        .Where(s => s.Order < seg.Order && s.Completed)
+        .Sum(s => s.ActualSec ?? 0);
+
+    // duration + drift
+    var thisDuration = Math.Max(0, nowSec - priorMark);
+    seg.Completed = true;
+    seg.ActualSec = thisDuration;
+    seg.DriftSec = seg.PlannedSec - thisDuration;  // <-- no ??
+
+    await db.SaveChangesAsync();
+
+    // Broadcast fresh state
+    await hub.Clients.Group(id.ToString()).StateUpdated(BuildState(run));
+    return Results.Ok(BuildState(run));
 });
+
 
 // 2) Start offering (idempotent)
 app.MapPost("/api/runs/{id:guid}/english/offering/start",
