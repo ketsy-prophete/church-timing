@@ -56,7 +56,7 @@ static object BuildState(Run run) => new
     masterStartUtc = run.MasterStartAtUtc.HasValue
         ? AsUtc(run.MasterStartAtUtc.Value).ToString("o")
         : null,
-    masterTargetSec = 36 * 60,
+    masterTargetSec = 22 * 60,
     preteachSec = run.PreteachSec,
     walkBufferSec = run.WalkBufferSec,
     baseOfferingSec = run.BaseOfferingSec,
